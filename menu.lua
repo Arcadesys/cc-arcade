@@ -44,6 +44,12 @@ local apps = {
     command = "video_poker",
   },
   {
+    id = "daleks",
+    name = "Daleks",
+    description = "Teleport away from advancing killer robots.",
+    command = "daleks",
+  },
+  {
     id = "button_debug",
     name = "Button Debug",
     description = "Light up each button to test wiring/links.",
