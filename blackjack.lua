@@ -274,6 +274,14 @@ local function drawButtonBar(actions, activeIndex)
   term.setTextColor(colors.white)
 end
 
+local function formatHandLabel(hand, hide, name)
+  local value = "--"
+  if #hand > 0 then
+    value = hide and "??" or tostring(handValue(hand))
+  end
+  return name .. " (" .. value .. ")"
+end
+
 local function render(activeButton)
   term.setBackgroundColor(colors.black)
   term.clear()
@@ -284,19 +292,14 @@ local function render(activeButton)
 
   local dealerY = 6
   local playerY = dealerY + CARD_H + 4
-  local dealerLabel
-  if dealerHoleHidden and mode == "player" then
-    dealerLabel = "DEALER (??)"
-  else
-    dealerLabel = "DEALER (" .. handValue(dealerHand) .. ")"
-  end
+  local hideDealer = dealerHoleHidden and mode == "player"
 
-  drawHand(dealerHand, dealerY, dealerLabel, dealerHoleHidden)
-  drawHand(playerHand, playerY, "YOU (" .. handValue(playerHand) .. ")", false)
+  drawHand(dealerHand, dealerY, formatHandLabel(dealerHand, hideDealer, "DEALER"), dealerHoleHidden)
+  drawHand(playerHand, playerY, formatHandLabel(playerHand, false, "YOU"), false)
 
   local actions
   if mode == "player" then
-    local doubleEnabled = allowDouble and #playerHand == 2 and bet * 2 <= bankroll
+    local doubleEnabled = allowDouble and #playerHand == 2 and activeBet * 2 <= bankroll
     local surrenderEnabled = allowSurrender and #playerHand == 2
     actions = {
       { label = "Hit" },
@@ -329,20 +332,20 @@ local function endRound(outcome, reason)
   allowSurrender = true
 
   if outcome == "player" then
-    bankroll = bankroll + bet
+    bankroll = bankroll + activeBet
     message = "You win! " .. (reason or "")
   elseif outcome == "player_blackjack" then
-    local win = math.floor(bet * 1.5 + 0.5)
+    local win = math.floor(activeBet * 1.5 + 0.5)
     bankroll = bankroll + win
     message = "Blackjack! +" .. win .. ". " .. (reason or "")
   elseif outcome == "push" then
     message = "Push. " .. (reason or "")
   elseif outcome == "surrender" then
-    local loss = math.ceil(bet / 2)
+    local loss = math.ceil(activeBet / 2)
     bankroll = bankroll - loss
     message = "You surrendered. -" .. loss .. ". " .. (reason or "")
   else
-    bankroll = bankroll - bet
+    bankroll = bankroll - activeBet
     message = "Dealer wins. " .. (reason or "")
   end
 
@@ -351,6 +354,7 @@ local function endRound(outcome, reason)
   end
 
   bet = clamp(bet, minBet, math.max(bankroll, minBet))
+  activeBet = bet
 end
 
 local function dealerPlay()
@@ -390,6 +394,7 @@ local function startRound()
   end
 
   bet = clamp(bet, minBet, bankroll)
+  activeBet = bet
   ensureDeck(15)
 
   playerHand = {}
@@ -447,11 +452,11 @@ local function doubleDown()
     message = "Double only on first decision."
     return
   end
-  if bet * 2 > bankroll then
+  if activeBet * 2 > bankroll then
     message = "Not enough bankroll to double."
     return
   end
-  bet = bet * 2
+  activeBet = activeBet * 2
   allowDouble = false
   allowSurrender = false
   dealCard(playerHand)
@@ -486,6 +491,7 @@ end
 
 local function adjustBet(delta)
   bet = clamp(bet + delta, minBet, math.max(bankroll, minBet))
+  activeBet = bet
   message = "Bet: $" .. bet
 end
 
@@ -513,6 +519,7 @@ local function handleButton(btn)
       startRound()
     elseif btn == 5 then
       bet = clamp(bankroll, minBet, bankroll)
+      activeBet = bet
       message = "Max bet set: $" .. bet
     end
   end
