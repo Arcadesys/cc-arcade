@@ -1,8 +1,8 @@
 -- daleks.lua
--- Classic Daleks-style survival for five-button controller + keyboard fallback.
+-- Placeholder for Daleks arcade port with five-button controls.
 
 -----------------------------
--- CONFIG: BUTTON MAPPING   --
+-- CONFIG: BUTTON MAPPING  --
 -----------------------------
 
 local buttons = {
