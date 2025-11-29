@@ -49,6 +49,12 @@ local apps = {
     description = "Light up each button to test wiring/links.",
     command = "button_debug",
   },
+  {
+    id = "daleks",
+    name = "Daleks",
+    description = "Grid chase with teleport + dalek collisions.",
+    command = "daleks",
+  },
 }
 
 local availableApps = {}
