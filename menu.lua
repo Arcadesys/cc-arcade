@@ -44,9 +44,15 @@ local apps = {
     command = "video_poker",
   },
   {
+    id = "dungeon_crawl",
+    name = "Dungeon Crawl",
+    description = "Three-floor ASDFG dungeon prototype.",
+    command = "game",
+  },
+  {
     id = "daleks",
     name = "Daleks",
-    description = "Teleport away from advancing killer robots.",
+    description = "Grid chase with teleport + dalek collisions.",
     command = "daleks",
   },
   {
