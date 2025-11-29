@@ -59,9 +59,10 @@ local function isSafePath(path)
 end
 
 local function encodeSegment(seg)
-  return seg:gsub("([^%w%-%._~])", function(c)
+  -- Wrap gsub call to return only the first result (string.gsub returns str, count)
+  return (seg:gsub("([^%w%-%._~])", function(c)
     return string.format("%%%02X", string.byte(c))
-  end)
+  end))
 end
 
 local function buildRawUrl(path)
