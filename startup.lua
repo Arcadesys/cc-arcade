@@ -57,6 +57,14 @@ local function showStaticNoDrive()
               _G.AR_STOP_STATIC = true
               nextAction = "disk"
               return
+          elseif event == "char" and p1 == "q" then
+              _G.AR_STOP_STATIC = true
+              nextAction = "exit"
+              return
+          elseif event == "terminate" then
+              _G.AR_STOP_STATIC = true
+              nextAction = "exit"
+              return
           end
       end
   end
@@ -72,6 +80,12 @@ local function showStaticNoDrive()
       if nextAction == "menu" then
           shell.run("menu.lua")
       elseif nextAction == "disk" or anyDiskPresent() then
+          return
+      elseif nextAction == "exit" then
+          term.setBackgroundColor(colors.black)
+          term.clear()
+          term.setCursorPos(1, 1)
+          print("Exited to terminal.")
           return
       end
   end

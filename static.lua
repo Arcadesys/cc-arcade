@@ -69,7 +69,7 @@ local function main()
     term.setTextColor(colors.white)
     term.clear()
     
-    parallel.waitForAll(drawStaticLoop, playWhiteNoise)
+    parallel.waitForAny(drawStaticLoop, playWhiteNoise)
 end
 
 main()
