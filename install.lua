@@ -71,12 +71,12 @@ local function buildRawUrl(path)
     table.insert(encoded, encodeSegment(segment))
   end
   local safePath = table.concat(encoded, "/")
-  return string.format(
-    "https://raw.githubusercontent.com/%s/%s/%s/%s",
+    "https://raw.githubusercontent.com/%s/%s/%s/%s?t=%d",
     owner,
     repo,
     branch,
-    safePath
+    safePath,
+    os.epoch and os.epoch("utc") or math.random(1000000)
   )
 end
 
