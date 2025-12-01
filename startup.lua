@@ -26,50 +26,50 @@ local function anyDiskPresent()
   return false
 end
 
-local function inputLoop()
-    while true do
-        local event, p1, p2, p3 = os.pullEvent()
-        
-        if event == "mouse_click" then
-            -- Click anywhere to open menu (was settings)
-            term.setBackgroundColor(colors.black)
-            term.clear()
-            shell.run("menu.lua")
-            return
-        elseif event == "redstone" then
-            -- Press any button to open main menu
-            local hasInput = false
-            for _, side in ipairs(rs.getSides()) do
-                if rs.getInput(side) then hasInput = true break end
-            end
-            
-            if hasInput then
-                term.setBackgroundColor(colors.black)
-                term.clear()
-                shell.run("menu.lua")
-                return
-            end
-        elseif event == "disk" or event == "disk_inserted" then
-            -- Disk inserted, return to main loop to handle it
-            return
-        end
-    end
-end
-
 local function showStaticNoDrive()
+  local nextAction = nil
+
   local function runStatic()
       shell.run("static.lua")
   end
 
+  local function inputLoop()
+      while true do
+          local event, p1, p2, p3 = os.pullEvent()
+          
+          if event == "mouse_click" then
+              nextAction = "menu"
+              return
+          elseif event == "redstone" then
+              -- Press any button to open main menu
+              local hasInput = false
+              for _, side in ipairs(rs.getSides()) do
+                  if rs.getInput(side) then hasInput = true break end
+              end
+              
+              if hasInput then
+                  nextAction = "menu"
+                  return
+              end
+          elseif event == "disk" or event == "disk_inserted" then
+              nextAction = "disk"
+              return
+          end
+      end
+  end
+
   while true do
-      -- Run loops in parallel. If inputLoop returns (after settings/menu exit or disk insert), we restart.
+      nextAction = nil
       parallel.waitForAny(runStatic, inputLoop)
       
-      -- Clear screen before restarting loop (or returning to main)
       term.setBackgroundColor(colors.black)
       term.clear()
       
-      if anyDiskPresent() then return end
+      if nextAction == "menu" then
+          shell.run("menu.lua")
+      elseif nextAction == "disk" or anyDiskPresent() then
+          return
+      end
   end
 end
 
