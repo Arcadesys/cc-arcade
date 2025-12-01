@@ -62,10 +62,10 @@ local apps = {
     command = "button_debug",
   },
   {
-    id = "daleks",
-    name = "Daleks",
-    description = "Grid chase with teleport + dalek collisions.",
-    command = "daleks",
+    id = "quiz_show",
+    name = "Quiz Show",
+    description = "Host-led buzzer quiz with JSON questions.",
+    command = "quiz_show",
   },
 }
 
