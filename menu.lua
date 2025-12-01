@@ -186,6 +186,12 @@ local function drawHeader()
   term.write("Arcade Menu")
   term.setCursorPos(2, 3)
   term.write(status)
+
+  -- Draw Settings Button (Gear)
+  term.setCursorPos(w, 1)
+  term.setBackgroundColor(colors.blue) -- Match header bg
+  term.setTextColor(colors.lightGray)
+  term.write("*")
 end
 
 local function drawList()
@@ -354,13 +360,24 @@ local function main()
   render(nil)
 
   while true do
-    local event, p1 = os.pullEvent()
+    local event, p1, p2, p3 = os.pullEvent()
     local pressed = nil
 
     if event == "redstone" then
       pressed = pollRedstone()
     elseif event == "key" then
       pressed = keyToButton[p1]
+    elseif event == "mouse_click" then
+      local button, x, y = p1, p2, p3
+      local w, h = term.getSize()
+      -- Hidden settings button in top-right corner
+      if x == w and y == 1 then
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        shell.run("settings.lua")
+        rebuildAppList() -- Refresh in case settings changed something (unlikely but good practice)
+        render(nil)
+      end
     end
 
     if pressed then

@@ -26,6 +26,14 @@ for i, btn in ipairs(buttons) do
   lastState[i] = redstone.getInput(btn.side)
 end
 
+local diagonalMode = false
+local btn5Down = false
+local btn5HoldTimer = nil
+local btn5HoldTriggered = false
+local lastBtn5ReleaseTime = 0
+local doubleTapWindow = 0.7
+local holdTime = 0.5
+
 -----------------------------
 -- LAYOUT / HELPERS         --
 -----------------------------
@@ -76,15 +84,17 @@ local function writeLine(y, text, fg, bg)
 end
 
 local function pollRedstone()
-  local pressedIndex = nil
+  local pressed, released = {}, {}
   for i, btn in ipairs(buttons) do
     local newState = redstone.getInput(btn.side)
     if newState and not lastState[i] then
-      pressedIndex = i
+      table.insert(pressed, i)
+    elseif not newState and lastState[i] then
+      table.insert(released, i)
     end
     lastState[i] = newState
   end
-  return pressedIndex
+  return pressed, released
 end
 
 -----------------------------
@@ -94,10 +104,9 @@ end
 local player = { x = 1, y = 1 }
 local daleks = {}
 local heaps = {}
-local message = "Evade the daleks and let them crash!"
+local message = "Evade the daleks. Tap BTN5 for diagonals, hold to teleport, double-tap to quit."
 local gameOver = false
 local statusLine = ""
-local lastBtn5Time = 0
 
 local function seedRng()
   local seed = os.epoch and os.epoch("utc") or os.time()
@@ -117,7 +126,8 @@ local function resetGame()
   daleks = {}
   heaps = {}
   gameOver = false
-  message = "Evade the daleks and let them crash!"
+  diagonalMode = false
+  message = "Evade the daleks. Tap BTN5 for diagonals, hold to teleport, double-tap to quit."
   statusLine = ""
 
   local dalekCount = clamp(math.floor((gridW * gridH) / 25), 6, 35)
@@ -182,9 +192,24 @@ local function drawGrid()
 end
 
 local function drawFooter()
-  local legend = "BTN1 Left  BTN2 Right  BTN3 Up  BTN4 Down  BTN5 Teleport (double=Quit)"
+  local legend
+  if diagonalMode then
+    legend = "Mode: Diagonal | BTN1 NW  BTN2 NE  BTN3 SW  BTN4 SE  BTN5 Tap=Cardinal Hold=Teleport Double=Quit"
+  else
+    legend = "Mode: Cardinal | BTN1 Left  BTN2 Right  BTN3 Up  BTN4 Down  BTN5 Tap=Diagonal Hold=Teleport Double=Quit"
+  end
+
+  local info = message
+  if statusLine ~= "" then
+    if info == "" then
+      info = statusLine
+    else
+      info = info .. " | " .. statusLine
+    end
+  end
+
+  writeLine(footerY - 1, info)
   writeLine(footerY, legend, colors.white, colors.gray)
-  writeLine(footerY - 1, message)
 end
 
 local function redraw()
@@ -261,14 +286,14 @@ local function advanceDaleks()
 
   if playerHit then
     gameOver = true
-    message = "A dalek got you! BTN5 double-tap to quit or any move to restart."
+    message = "A dalek got you! Move to restart or double-tap BTN5 to quit."
     statusLine = ""
     return
   end
 
   if #daleks == 0 then
     gameOver = true
-    message = "You win! BTN5 double-tap to quit or move to play again."
+    message = "You win! Move to play again or double-tap BTN5 to quit."
   else
     local heapCount = 0
     for _ in pairs(heaps) do heapCount = heapCount + 1 end
@@ -314,33 +339,91 @@ local function teleport()
 end
 
 -----------------------------
--- MAIN LOOP                --
+-- INPUT HANDLING            --
 -----------------------------
 
-local function handleButton(btn)
+local function toggleDiagonalMode()
+  diagonalMode = not diagonalMode
+  if not gameOver then
+    message = diagonalMode and "Diagonal moves enabled." or "Cardinal moves enabled."
+  end
+  redraw()
+end
+
+local function quitGame()
+  term.setTextColor(colors.white)
+  term.setBackgroundColor(colors.black)
+  term.clear()
+  term.setCursorPos(1, 1)
+  print("Exiting Daleks…")
+  error("quit", 0)
+end
+
+local function directionFromButton(btn)
+  if diagonalMode then
+    if btn == 1 then return -1, -1 end
+    if btn == 2 then return 1, -1 end
+    if btn == 3 then return -1, 1 end
+    if btn == 4 then return 1, 1 end
+  else
+    if btn == 1 then return -1, 0 end
+    if btn == 2 then return 1, 0 end
+    if btn == 3 then return 0, -1 end
+    if btn == 4 then return 0, 1 end
+  end
+  return nil, nil
+end
+
+local function handlePress(btn)
   if not btn then return end
-  if btn == 1 then
-    movePlayer(-1, 0)
-  elseif btn == 2 then
-    movePlayer(1, 0)
-  elseif btn == 3 then
-    movePlayer(0, -1)
-  elseif btn == 4 then
-    movePlayer(0, 1)
-  elseif btn == 5 then
-    local now = os.clock()
-    if now - lastBtn5Time < 0.7 then
-      term.setTextColor(colors.white)
-      term.setBackgroundColor(colors.black)
-      term.clear()
-      term.setCursorPos(1,1)
-      print("Exiting Daleks…")
-      error("quit", 0)
-    end
-    lastBtn5Time = now
-    teleport()
+  if btn == 5 then
+    btn5Down = true
+    btn5HoldTriggered = false
+    btn5HoldTimer = os.startTimer(holdTime)
+    return
+  end
+
+  local dx, dy = directionFromButton(btn)
+  if dx and dy then
+    movePlayer(dx, dy)
   end
 end
+
+local function handleRelease(btn)
+  if btn ~= 5 then return end
+  btn5Down = false
+  local releaseTime = os.clock()
+  btn5HoldTimer = nil
+
+  if btn5HoldTriggered then
+    btn5HoldTriggered = false
+    lastBtn5ReleaseTime = 0
+    return
+  end
+
+  if releaseTime - lastBtn5ReleaseTime < doubleTapWindow then
+    lastBtn5ReleaseTime = 0
+    quitGame()
+    return
+  end
+
+  lastBtn5ReleaseTime = releaseTime
+  toggleDiagonalMode()
+end
+
+local function handleTimer(timerId)
+  if btn5HoldTimer and timerId == btn5HoldTimer then
+    if btn5Down then
+      btn5HoldTriggered = true
+      btn5HoldTimer = nil
+      teleport()
+    end
+  end
+end
+
+-----------------------------
+-- MAIN LOOP                --
+-----------------------------
 
 local function main()
   adjustTextScale()
@@ -349,13 +432,28 @@ local function main()
 
   while true do
     local event, p1 = os.pullEvent()
-    local btn = nil
+    local pressed, released = nil, nil
     if event == "redstone" then
-      btn = pollRedstone()
+      pressed, released = pollRedstone()
     elseif event == "key" then
-      btn = keyToButton[p1]
+      pressed = { keyToButton[p1] }
+    elseif event == "key_up" then
+      released = { keyToButton[p1] }
+    elseif event == "timer" then
+      handleTimer(p1)
     end
-    handleButton(btn)
+
+    if pressed then
+      for _, btn in ipairs(pressed) do
+        handlePress(btn)
+      end
+    end
+
+    if released then
+      for _, btn in ipairs(released) do
+        handleRelease(btn)
+      end
+    end
   end
 end
 

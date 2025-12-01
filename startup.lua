@@ -1,5 +1,5 @@
--- Boot entrypoint that launches the arcade menu.
--- Watches disk eject/insert events as an out-of-band "sixth button."
+-- Boot entrypoint that launches the arcade menu or disk game.
+-- Watches disk eject/insert events.
 
 local staticChars = { ".", ",", ":", ";", "*", "'" }
 local staticColors = { colors.gray, colors.lightGray, colors.white }
@@ -26,120 +26,71 @@ local function anyDiskPresent()
   return false
 end
 
-local function waitForDiskInsert()
-  while true do
-    local ev = { os.pullEvent() }
-    local name = ev[1]
-    if name == "disk" or name == "disk_inserted" then
-      return
-    end
-  end
-end
-
-local function waitForDiskRemoval()
-  while true do
-    local ev = { os.pullEvent() }
-    local name, side = ev[1], ev[2]
-    if name == "disk_eject" or name == "disk_removed" then
-      return
-    elseif name == "peripheral_detach" and peripheral and peripheral.getType then
-      if peripheral.getType(side) == "drive" then
-        return
-      end
-    end
-  end
-end
-
-local function drawStaticFrame()
-  local w, h = term.getSize()
-  term.setBackgroundColor(colors.black)
-  for y = 1, math.max(1, h - 2) do
-    term.setCursorPos(1, y)
-    local fg = staticColors[math.random(#staticColors)]
-    term.setTextColor(fg)
-    local line = {}
-    for x = 1, w do
-      line[x] = staticChars[math.random(#staticChars)]
-    end
-    term.write(table.concat(line))
-  end
-
-  local msg = "Cartridge missing. Insert to return to menu."
-  if #msg > w then
-    msg = (w > 3) and (msg:sub(1, w - 3) .. "...") or msg:sub(1, w)
-  end
-  local x = math.max(1, math.floor((w - #msg) / 2) + 1)
-  term.setBackgroundColor(colors.black)
-  term.setTextColor(colors.lightGray)
-  term.setCursorPos(x, h - 1)
-  term.write(msg)
-end
-
-local function showStaticUntilDisk()
-  seedRng()
-  term.setBackgroundColor(colors.black)
-  term.setTextColor(colors.white)
-  term.clear()
-
-  while true do
-    drawStaticFrame()
-    local timer = os.startTimer(0.08)
+local function inputLoop()
     while true do
-      local ev = { os.pullEvent() }
-      local name, id = ev[1], ev[2]
-      if name == "disk" or name == "disk_inserted" then
-        term.setBackgroundColor(colors.black)
-        term.setTextColor(colors.white)
-        term.clear()
-        return
-      elseif name == "timer" and id == timer then
-        break
-      end
+        local event, p1, p2, p3 = os.pullEvent()
+        
+        if event == "mouse_click" then
+            -- Click anywhere to open menu (was settings)
+            term.setBackgroundColor(colors.black)
+            term.clear()
+            shell.run("menu.lua")
+            return
+        elseif event == "redstone" then
+            -- Press any button to open main menu
+            local hasInput = false
+            for _, side in ipairs(rs.getSides()) do
+                if rs.getInput(side) then hasInput = true break end
+            end
+            
+            if hasInput then
+                term.setBackgroundColor(colors.black)
+                term.clear()
+                shell.run("menu.lua")
+                return
+            end
+        elseif event == "disk" or event == "disk_inserted" then
+            -- Disk inserted, return to main loop to handle it
+            return
+        end
     end
-  end
 end
 
-local function runMenu()
-  if shell and shell.run then
-    return shell.run("menu")
-  else
-    local baseEnv = _ENV or _G
-    return os.run(setmetatable({}, { __index = baseEnv }), "menu.lua")
-  end
-end
-
-local function runArcade()
-  if driveAvailable() and not anyDiskPresent() then
-    showStaticUntilDisk()
+local function showStaticNoDrive()
+  local function runStatic()
+      shell.run("static.lua")
   end
 
   while true do
-    local diskPulled = false
-    local ok, err = true, nil
-
-    local function menuThread()
-      ok, err = pcall(runMenu)
-    end
-
-    local function diskThread()
-      waitForDiskRemoval()
-      diskPulled = true
-    end
-
-    parallel.waitForAny(menuThread, diskThread)
-
-    if diskPulled then
-      showStaticUntilDisk()
-      -- After reinsertion, restart at the menu entry point.
-    else
-      if not ok then
-        print("Arcade menu failed to start:")
-        print(tostring(err))
-        print("Dropping to shell.")
-      end
-      return
-    end
+      -- Run loops in parallel. If inputLoop returns (after settings/menu exit or disk insert), we restart.
+      parallel.waitForAny(runStatic, inputLoop)
+      
+      -- Clear screen before restarting loop (or returning to main)
+      term.setBackgroundColor(colors.black)
+      term.clear()
+      
+      if anyDiskPresent() then return end
   end
 end
 
-runArcade()
+local function runDisk()
+    if fs.exists("disk/startup.lua") then
+        shell.run("disk/startup.lua")
+    elseif fs.exists("disk/startup") then
+        shell.run("disk/startup")
+    else
+        -- Fallback if disk is empty or has no startup
+        -- We return to static screen instead of menu
+        showStaticNoDrive()
+    end
+end
+
+local function main()
+  if anyDiskPresent() then
+    runDisk()
+  else
+    showStaticNoDrive()
+  end
+end
+
+main()
