@@ -67,6 +67,12 @@ local apps = {
     description = "Host-led buzzer quiz with JSON questions.",
     command = "quiz_show",
   },
+  {
+    id = "slots",
+    name = "Super Slots",
+    description = "3-reel slot machine. Spin to win!",
+    command = "slots",
+  },
 }
 
 local availableApps = {}

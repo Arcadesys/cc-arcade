@@ -325,11 +325,84 @@ local function stopSpinning()
     checkWin()
 end
 
-local function checkRedstone()
-    for _, side in ipairs(rs.getSides()) do
-        if rs.getInput(side) then return true end
+--------------------------------------------------------------------------------
+-- INPUT HANDLING
+--------------------------------------------------------------------------------
+
+local buttons = {
+    [1] = { side = "left",   label = "Bet -" },
+    [2] = { side = "right",  label = "Bet +" },
+    [3] = { side = "top",    label = "Spin" },
+    [4] = { side = "front",  label = "Max Bet" },
+    [5] = { side = "bottom", label = "Exit" },
+}
+
+local keyToButton = {
+    [keys.a] = 1,
+    [keys.s] = 2,
+    [keys.d] = 3,
+    [keys.f] = 4,
+    [keys.g] = 5,
+    [keys.q] = 5,
+    [keys.enter] = 3,
+    [keys.space] = 3,
+    [keys.up] = 2,
+    [keys.down] = 1,
+}
+
+local lastState = {}
+for i, btn in ipairs(buttons) do
+    lastState[i] = redstone.getInput(btn.side)
+end
+
+local function pollRedstone()
+    local pressedIndex = nil
+    for i, btn in ipairs(buttons) do
+        local newState = redstone.getInput(btn.side)
+        if newState and not lastState[i] then
+            pressedIndex = i
+        end
+        lastState[i] = newState
     end
-    return false
+    return pressedIndex
+end
+
+local function handleInput(btnIdx)
+    if btnIdx == 1 then -- Bet -
+        if not isSpinning and bet > 1 then 
+            bet = bet - 1 
+            message = "Bet: " .. bet
+        end
+    elseif btnIdx == 2 then -- Bet +
+        if not isSpinning and bet < 3 then 
+            bet = bet + 1 
+            message = "Bet: " .. bet
+        end
+    elseif btnIdx == 3 then -- Spin
+        if not isSpinning then
+            if startSpinning() then
+                stopSpinning()
+            end
+        end
+    elseif btnIdx == 4 then -- Max Bet
+        if not isSpinning then
+            bet = 3
+            message = "Max Bet!"
+            if startSpinning() then
+                stopSpinning()
+            end
+        end
+    elseif btnIdx == 5 then -- Exit
+        return "exit"
+    end
+end
+
+local function drawControls()
+    local y = h
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.gray)
+    term.setCursorPos(1, y)
+    term.write("Controls: [1]Bet- [2]Bet+ [3]Spin [4]Max [5]Exit")
 end
 
 local function main()
@@ -338,56 +411,26 @@ local function main()
     
     while true do
         drawUI()
+        drawControls()
         
-        -- Non-blocking input check
         local event, p1 = os.pullEvent()
+        local pressed = nil
         
         if event == "key" then
-            local key = p1
-            if key == keys.q then
+            pressed = keyToButton[p1]
+        elseif event == "redstone" then
+            pressed = pollRedstone()
+        end
+        
+        if pressed then
+            local action = handleInput(pressed)
+            if action == "exit" then
                 term.setBackgroundColor(colors.black)
                 term.clear()
                 term.setCursorPos(1,1)
                 print("Thanks for playing!")
                 return
-            elseif key == keys.up then
-                if not isSpinning and bet < 3 then bet = bet + 1 end
-            elseif key == keys.down then
-                if not isSpinning and bet > 1 then bet = bet - 1 end
-            elseif key == keys.enter or key == keys.space then
-                -- Manual spin (one-shot)
-                if not isSpinning then
-                    if startSpinning() then
-                        stopSpinning()
-                    end
-                end
             end
-        elseif event == "redstone" then
-            local active = checkRedstone()
-            
-            if active and not isSpinning then
-                -- Lever pulled: Start
-                startSpinning()
-                isLeverActive = true
-            elseif not active and isSpinning and isLeverActive then
-                -- Lever reset: Stop
-                stopSpinning()
-                isLeverActive = false
-            end
-        elseif event == "timer" then
-             -- Timer event for continuous spin
-             if isSpinning and isLeverActive then
-                -- Spin all reels
-                for i = 1, 3 do
-                    reelPos[i] = (reelPos[i] % REEL_LENGTH) + 1
-                end
-                os.startTimer(0.05)
-             end
-        end
-        
-        -- Ensure timer loop is running if lever is active
-        if isSpinning and isLeverActive and event ~= "timer" then
-             os.startTimer(0.05)
         end
     end
 end
