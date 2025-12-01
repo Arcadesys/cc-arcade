@@ -38,6 +38,7 @@ local function showStaticNoDrive()
           local event, p1, p2, p3 = os.pullEvent()
           
           if event == "mouse_click" then
+              _G.AR_STOP_STATIC = true
               nextAction = "menu"
               return
           elseif event == "redstone" then
@@ -48,10 +49,12 @@ local function showStaticNoDrive()
               end
               
               if hasInput then
+                  _G.AR_STOP_STATIC = true
                   nextAction = "menu"
                   return
               end
           elseif event == "disk" or event == "disk_inserted" then
+              _G.AR_STOP_STATIC = true
               nextAction = "disk"
               return
           end
@@ -60,6 +63,7 @@ local function showStaticNoDrive()
 
   while true do
       nextAction = nil
+      _G.AR_STOP_STATIC = false
       parallel.waitForAny(runStatic, inputLoop)
       
       term.setBackgroundColor(colors.black)

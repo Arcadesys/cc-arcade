@@ -55,6 +55,9 @@ end
 
 local function drawStaticLoop()
     while true do
+        if _G.AR_STOP_STATIC then
+            return
+        end
         drawStaticFrame()
         sleep(0.05)
     end
