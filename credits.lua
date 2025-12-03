@@ -4,6 +4,10 @@ local DEFAULT_CREDITS = 0 -- Default to 0 if no disk/file
 local credits = {}
 
 function credits.get()
+    if _G.ARCADE_DEV_MODE then
+        return math.huge
+    end
+
     if not fs.exists(CREDITS_FILE) then
         return DEFAULT_CREDITS
     end
@@ -23,6 +27,10 @@ function credits.get()
 end
 
 function credits.set(amount)
+    if _G.ARCADE_DEV_MODE then
+        return true -- No-op in dev mode
+    end
+
     -- Only write if the directory exists (disk is present)
     local dir = fs.getDir(CREDITS_FILE)
     if not fs.exists(dir) then
@@ -46,6 +54,10 @@ function credits.add(amount)
 end
 
 function credits.remove(amount)
+    if _G.ARCADE_DEV_MODE then
+        return true -- Always successful in dev mode
+    end
+
     local current = credits.get()
     if current >= amount then
         credits.set(current - amount)

@@ -4,6 +4,25 @@
 term.clear()
 term.setCursorPos(1, 1)
 print("Booting ArcadeOS...")
+print("Press 'D' for Dev Mode (2s)...")
+
+_G.ARCADE_DEV_MODE = false
+local timer = os.startTimer(2)
+while true do
+    local event, p1 = os.pullEvent()
+    if event == "timer" and p1 == timer then
+        break
+    elseif event == "char" and p1:lower() == "d" then
+        _G.ARCADE_DEV_MODE = true
+        print("DEV MODE ENABLED: Infinite Credits")
+        sleep(1)
+        break
+    end
+end
+
+if not _G.ARCADE_DEV_MODE then
+    print("Production Mode: Standard Credits")
+end
 sleep(0.5)
 
 if fs.exists(".arcade_config") then
