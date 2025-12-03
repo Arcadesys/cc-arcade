@@ -7,6 +7,7 @@ local games = {
     { name = "Super Slots", cmd = "slots" },
     { name = "Can't Stop", cmd = "cant_stop" },
     { name = "RPS Rogue", cmd = "rps_rogue" },
+    { name = "Exit", cmd = "exit" },
     { name = "Reboot", cmd = "reboot" },
     { name = "Shutdown", cmd = "shutdown" }
 }
@@ -28,6 +29,8 @@ local function isKey(key, set)
     return false
 end
 
+local credits = require("credits")
+
 local function drawHeader()
     term.setBackgroundColor(colors.blue)
     term.setTextColor(colors.yellow)
@@ -35,6 +38,11 @@ local function drawHeader()
     term.clearLine()
     term.setCursorPos(2, 1)
     term.write("ARCADE OS")
+    
+    local c = credits.get()
+    local cStr = "Credits: " .. c
+    term.setCursorPos(w - #cStr - 1, 1)
+    term.write(cStr)
 end
 
 local function drawMenu()
@@ -76,6 +84,8 @@ local function launchGame()
         os.reboot()
     elseif game.cmd == "shutdown" then
         os.shutdown()
+    elseif game.cmd == "exit" then
+        return true
     else
         if fs.exists(game.cmd .. ".lua") then
             shell.run(game.cmd)
@@ -84,6 +94,7 @@ local function launchGame()
             sleep(1)
         end
     end
+    return false
 end
 
 local function main()
@@ -100,7 +111,7 @@ local function main()
                 selected = selected + 1
                 if selected > #games then selected = 1 end
             elseif isKey(p1, KEYS.CENTER) then
-                launchGame()
+                if launchGame() then break end
             end
         elseif event == "redstone" then
             -- Poll redstone inputs for physical buttons
@@ -113,7 +124,7 @@ local function main()
                 if selected > #games then selected = 1 end
                 sleep(0.2)
             elseif redstone.getInput("top") or redstone.getInput("front") then
-                launchGame()
+                if launchGame() then break end
                 sleep(0.2)
             end
         end

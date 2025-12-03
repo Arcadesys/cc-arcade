@@ -225,13 +225,42 @@ local function drawTable(players, dealerHand, currentPlayerIdx, message, showDea
         drawCenter(h-1, message, C_MSG, colors.black)
     end
     
-    term.setCursorPos(1, h)
-    term.setTextColor(colors.white)
-    if currentPlayerIdx > 0 then
-        term.write(" [L] Hit   [C] Stand   [R] Shift >")
-    else
-        term.write(" [C] Play Again   [R] Exit")
+    -- Draw 3-Column Footer
+    local colW = math.floor(w / 3)
+    local c1 = "Hit"
+    local c2 = "Stand"
+    local c3 = "Shift >"
+    
+    if currentPlayerIdx == 0 then
+        c1 = "-"
+        c2 = "Play Again"
+        c3 = "Exit"
+    elseif message and string.find(message, "ADV") then
+        c1 = "Double"
+        c2 = "Surrender"
+        c3 = "Back"
     end
+    
+    -- Left Button
+    term.setCursorPos(1, h)
+    term.setBackgroundColor(colors.red)
+    term.setTextColor(colors.white)
+    term.write(string.rep(" ", colW))
+    drawText(math.floor(colW/2 - #c1/2)+1, h, c1, colors.white, colors.red)
+    
+    -- Center Button
+    term.setCursorPos(colW + 1, h)
+    term.setBackgroundColor(colors.yellow)
+    term.setTextColor(colors.black)
+    term.write(string.rep(" ", colW))
+    drawText(colW + math.floor(colW/2 - #c2/2)+1, h, c2, colors.black, colors.yellow)
+    
+    -- Right Button
+    term.setCursorPos(colW * 2 + 1, h)
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
+    term.write(string.rep(" ", w - (colW*2)))
+    drawText(colW*2 + math.floor((w - colW*2)/2 - #c3/2)+1, h, c3, colors.white, colors.blue)
 end
 
 --------------------------------------------------------------------------------
@@ -259,11 +288,24 @@ local function main()
     
     local deck = createDeck()
     
+local creditsAPI = require("credits")
+
     while true do
+        -- Check Credits
+        if creditsAPI.get() < 10 then
+            term.setBackgroundColor(colors.black)
+            term.clear()
+            drawCenter(h/2, "Not enough credits!", colors.red, colors.black)
+            drawCenter(h/2+1, "Need 10 credits.", colors.white, colors.black)
+            sleep(2)
+            break
+        end
+
         -- New Round
         local players = {}
         for i=1, numPlayers do
             table.insert(players, {hand={}, status="Playing", bet=10})
+            creditsAPI.remove(10) -- Deduct bet immediately
         end
         local dealerHand = {}
         
@@ -329,18 +371,20 @@ local function main()
         local dealerScore = calculateHand(dealerHand)
         local dealerBust = dealerScore > 21
         
-        for i, p in ipairs(players) do
-            local pScore = calculateHand(p.hand)
             if p.status == "Bust!" then
                 p.status = "LOSE"
             elseif p.status == "Surrender" then
                 p.status = "SURRENDER"
+                creditsAPI.add(math.floor(p.bet / 2))
             elseif dealerBust then
                 p.status = "WIN!"
+                creditsAPI.add(p.bet * 2)
             elseif pScore > dealerScore then
                 p.status = "WIN!"
+                creditsAPI.add(p.bet * 2)
             elseif pScore == dealerScore then
                 p.status = "PUSH"
+                creditsAPI.add(p.bet)
             else
                 p.status = "LOSE"
             end

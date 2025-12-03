@@ -93,6 +93,38 @@ end
 -- UI
 --------------------------------------------------------------------------------
 
+local function drawText(x, y, text, fg, bg)
+    term.setCursorPos(x, y)
+    if fg then term.setTextColor(fg) end
+    if bg then term.setBackgroundColor(bg) end
+    term.write(text)
+end
+
+local function drawFooter(c1, c2, c3)
+    local colW = math.floor(w / 3)
+    
+    -- Left Button
+    term.setCursorPos(1, h)
+    term.setBackgroundColor(colors.red)
+    term.setTextColor(colors.white)
+    term.write(string.rep(" ", colW))
+    drawText(math.floor(colW/2 - #c1/2)+1, h, c1, colors.white, colors.red)
+    
+    -- Center Button
+    term.setCursorPos(colW + 1, h)
+    term.setBackgroundColor(colors.yellow)
+    term.setTextColor(colors.black)
+    term.write(string.rep(" ", colW))
+    drawText(colW + math.floor(colW/2 - #c2/2)+1, h, c2, colors.black, colors.yellow)
+    
+    -- Right Button
+    term.setCursorPos(colW * 2 + 1, h)
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
+    term.write(string.rep(" ", w - (colW*2)))
+    drawText(colW*2 + math.floor((w - colW*2)/2 - #c3/2)+1, h, c3, colors.white, colors.blue)
+end
+
 local function drawBoard(showTemp)
     term.setBackgroundColor(colors.black)
     term.clear()
@@ -160,18 +192,26 @@ local function drawActionMenu()
     term.clearLine()
     term.write("Action:")
     
-    term.setCursorPos(1, h)
-    term.setBackgroundColor(colors.gray)
-    term.setTextColor(colors.black)
-    term.clearLine()
-    term.write(" [L] Roll Again   [C] Stop (Save)   [R] View Board")
+    drawFooter("Roll Again", "Stop (Save)", "View Board")
 end
 
 --------------------------------------------------------------------------------
 -- MAIN LOOP
 --------------------------------------------------------------------------------
 
+local creditsAPI = require("credits")
+
 local function main()
+    if creditsAPI.get() < 5 then
+        term.clear()
+        term.setCursorPos(1, h/2)
+        term.setTextColor(colors.red)
+        term.write("Insert Coin: 5 Credits")
+        sleep(2)
+        return
+    end
+    creditsAPI.remove(5)
+
     while true do
         -- Turn Start
         tempMarkers = {}
@@ -222,10 +262,7 @@ local function main()
                     end
                     
                     term.setCursorPos(1, h)
-                    term.setBackgroundColor(colors.gray)
-                    term.setTextColor(colors.black)
-                    term.clearLine()
-                    term.write(" [L] Opt 1   [C] Opt 2   [R] Opt 3")
+                    drawFooter("Opt 1", "Opt 2", "Opt 3")
                     
                     local key = waitKey()
                     local selIdx = 0

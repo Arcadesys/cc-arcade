@@ -67,7 +67,8 @@ for i=1,3 do
     end
 end
 
-local credits = 100
+local creditsAPI = require("credits")
+-- local credits = 100 -- Removed local credits
 local bet = 1
 local reelPos = {1, 1, 1}
 local message = "Press [C] to Spin!"
@@ -75,6 +76,38 @@ local message = "Press [C] to Spin!"
 --------------------------------------------------------------------------------
 -- DRAWING
 --------------------------------------------------------------------------------
+
+local function drawText(x, y, text, fg, bg)
+    term.setCursorPos(x, y)
+    if fg then term.setTextColor(fg) end
+    if bg then term.setBackgroundColor(bg) end
+    term.write(text)
+end
+
+local function drawFooter(c1, c2, c3)
+    local colW = math.floor(w / 3)
+    
+    -- Left Button
+    term.setCursorPos(1, h)
+    term.setBackgroundColor(colors.red)
+    term.setTextColor(colors.white)
+    term.write(string.rep(" ", colW))
+    drawText(math.floor(colW/2 - #c1/2)+1, h, c1, colors.white, colors.red)
+    
+    -- Center Button
+    term.setCursorPos(colW + 1, h)
+    term.setBackgroundColor(colors.yellow)
+    term.setTextColor(colors.black)
+    term.write(string.rep(" ", colW))
+    drawText(colW + math.floor(colW/2 - #c2/2)+1, h, c2, colors.black, colors.yellow)
+    
+    -- Right Button
+    term.setCursorPos(colW * 2 + 1, h)
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
+    term.write(string.rep(" ", w - (colW*2)))
+    drawText(colW*2 + math.floor((w - colW*2)/2 - #c3/2)+1, h, c3, colors.white, colors.blue)
+end
 
 local function drawReel(idx, x, y)
     for i=0,2 do
@@ -116,15 +149,12 @@ local function drawUI()
     -- Info
     term.setCursorPos(2, h-2)
     term.setTextColor(colors.white)
-    term.write("Credits: " .. credits)
+    term.write("Credits: " .. creditsAPI.get())
     term.setCursorPos(w-10, h-2)
     term.write("Bet: " .. bet)
     
     term.setCursorPos(1, h)
-    term.setBackgroundColor(colors.gray)
-    term.setTextColor(colors.black)
-    term.clearLine()
-    term.write(" [L] Bet   [C] Spin   [R] Exit")
+    drawFooter("Bet", "Spin", "Exit")
     
     term.setCursorPos(2, h-4)
     term.setBackgroundColor(colors.black)
@@ -133,11 +163,11 @@ local function drawUI()
 end
 
 local function spin()
-    if credits < bet then
+    if creditsAPI.get() < bet then
         message = "Not enough credits!"
         return
     end
-    credits = credits - bet
+    creditsAPI.remove(bet)
     message = "Spinning..."
     
     -- Animation
@@ -175,7 +205,7 @@ local function spin()
     if bet >= 3 then win = win + checkLine(2) end -- Bottom (offset 2)
     
     if win > 0 then
-        credits = credits + win
+        creditsAPI.add(win)
         message = "WINNER! " .. win
         for i=1,3 do
             term.setBackgroundColor(colors.lime)

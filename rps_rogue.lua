@@ -84,6 +84,42 @@ end
 -- UI
 --------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------
+-- UI
+--------------------------------------------------------------------------------
+
+local function drawText(x, y, text, fg, bg)
+    term.setCursorPos(x, y)
+    if fg then term.setTextColor(fg) end
+    if bg then term.setBackgroundColor(bg) end
+    term.write(text)
+end
+
+local function drawFooter(c1, c2, c3)
+    local colW = math.floor(w / 3)
+    
+    -- Left Button
+    term.setCursorPos(1, h)
+    term.setBackgroundColor(colors.red)
+    term.setTextColor(colors.white)
+    term.write(string.rep(" ", colW))
+    drawText(math.floor(colW/2 - #c1/2)+1, h, c1, colors.white, colors.red)
+    
+    -- Center Button
+    term.setCursorPos(colW + 1, h)
+    term.setBackgroundColor(colors.yellow)
+    term.setTextColor(colors.black)
+    term.write(string.rep(" ", colW))
+    drawText(colW + math.floor(colW/2 - #c2/2)+1, h, c2, colors.black, colors.yellow)
+    
+    -- Right Button
+    term.setCursorPos(colW * 2 + 1, h)
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
+    term.write(string.rep(" ", w - (colW*2)))
+    drawText(colW*2 + math.floor((w - colW*2)/2 - #c3/2)+1, h, c3, colors.white, colors.blue)
+end
+
 local function drawBar(label, val, max, y, color)
     term.setCursorPos(2, y)
     term.setTextColor(color)
@@ -133,10 +169,7 @@ local function drawUI()
     
     -- Controls
     term.setCursorPos(1, h)
-    term.setBackgroundColor(colors.gray)
-    term.setTextColor(colors.black)
-    term.clearLine()
-    term.write(" [L] Rock   [C] Paper   [R] Scissors")
+    drawFooter("Rock", "Paper", "Scissors")
 end
 
 local function drawUpgradeMenu()
@@ -148,22 +181,27 @@ local function drawUpgradeMenu()
     term.clearLine()
     term.write(" LEVEL UP! Choose Upgrade:")
     
-    term.setCursorPos(2, 5)
-    term.setTextColor(colors.white)
-    term.write("[L] Heal Full HP")
-    
-    term.setCursorPos(2, 7)
-    term.write("[C] +5 Max HP")
-    
-    term.setCursorPos(2, 9)
-    term.write("[R] +1 Damage")
+    term.setCursorPos(1, h)
+    drawFooter("Heal Full", "+5 Max HP", "+1 Damage")
 end
 
 --------------------------------------------------------------------------------
 -- MAIN LOOP
 --------------------------------------------------------------------------------
 
+local creditsAPI = require("credits")
+
 local function main()
+    if creditsAPI.get() < 5 then
+        term.clear()
+        term.setCursorPos(1, h/2)
+        term.setTextColor(colors.red)
+        term.write("Insert Coin: 5 Credits")
+        sleep(2)
+        return
+    end
+    creditsAPI.remove(5)
+
     generateEnemy()
     
     while true do
@@ -182,6 +220,7 @@ local function main()
             -- Victory
             floor = floor + 1
             player.level = player.level + 1
+            creditsAPI.add(5) -- Reward for clearing floor
             
             -- Upgrade
             drawUpgradeMenu()
