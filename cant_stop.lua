@@ -212,6 +212,101 @@ local function main()
     end
     creditsAPI.remove(5)
 
+    -- Player Selection
+    local numPlayers = 1
+    while true do
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        drawText(cx - 5, cy - 2, "CANT STOP", colors.lime, colors.black)
+        drawText(cx - 8, cy, "Select Players: " .. numPlayers, colors.white, colors.black)
+        drawText(cx - 10, cy + 2, "[L] -   [C] Start   [R] +", colors.gray, colors.black)
+        
+        local key = waitKey()
+        if key == "LEFT" and numPlayers > 1 then numPlayers = numPlayers - 1 end
+        if key == "RIGHT" and numPlayers < 3 then numPlayers = numPlayers + 1 end
+        if key == "CENTER" then break end
+    end
+
+    -- Initialize Board for N players
+    -- board[col] = { positions = {0, 0, 0}, owner = nil }
+    for i=2,12 do 
+        board[i] = { positions={}, owner=nil } 
+        for p=1, numPlayers do board[i].positions[p] = 0 end
+    end
+
+    local currentPlayer = 1
+    
+    -- Redefine drawBoard to handle N players
+    local function drawBoard(showTemp)
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        
+        -- Draw Columns
+        local startX = 2
+        for col=2,12 do
+            local x = startX + (col-2)*3
+            local len = COL_LENGTHS[col]
+            local owner = board[col].owner
+            
+            -- Header
+            term.setCursorPos(x, 1)
+            if owner == 1 then term.setTextColor(colors.blue)
+            elseif owner == 2 then term.setTextColor(colors.red)
+            elseif owner == 3 then term.setTextColor(colors.green)
+            else term.setTextColor(colors.white) end
+            term.write(tostring(col))
+            
+            -- Track
+            for step=1, len do
+                local y = h - 2 - step
+                term.setCursorPos(x, y)
+                
+                local char = "."
+                local fg = colors.gray
+                
+                -- Check markers
+                local temp = tempMarkers[col]
+                
+                if showTemp and temp and temp == step then
+                    char = "X"
+                    if currentPlayer == 1 then fg = colors.cyan
+                    elseif currentPlayer == 2 then fg = colors.orange
+                    else fg = colors.lime end
+                else
+                    -- Check player positions
+                    local occupants = {}
+                    for p=1, numPlayers do
+                        if board[col].positions[p] == step then table.insert(occupants, p) end
+                    end
+                    
+                    if #occupants > 0 then
+                        if #occupants > 1 then
+                            char = "*" -- Multiple
+                            fg = colors.magenta
+                        else
+                            char = tostring(occupants[1])
+                            if occupants[1] == 1 then fg = colors.blue
+                            elseif occupants[1] == 2 then fg = colors.red
+                            elseif occupants[1] == 3 then fg = colors.green end
+                        end
+                    end
+                end
+                
+                term.setTextColor(fg)
+                term.write(char)
+            end
+        end
+        
+        -- Status
+        term.setCursorPos(1, h)
+        term.setBackgroundColor(colors.gray)
+        term.setTextColor(colors.black)
+        term.clearLine()
+        local pColor = "Blue"
+        if currentPlayer == 2 then pColor = "Red" elseif currentPlayer == 3 then pColor = "Green" end
+        term.write(" P" .. currentPlayer .. " ("..pColor..") Turn")
+    end
+
     while true do
         -- Turn Start
         tempMarkers = {}
@@ -223,8 +318,24 @@ local function main()
             local dice = rollDice()
             local options = getPairings(dice)
             
+            -- Helper to check advance with new board structure
+            local function canAdvance(col)
+                if board[col].owner then return false end
+                if runnersUsed >= MAX_RUNNERS and not tempMarkers[col] then
+                    return false
+                end
+                local current = tempMarkers[col] or board[col].positions[currentPlayer]
+                if current >= COL_LENGTHS[col] then return false end
+                return true
+            end
+
             -- Check for Bust (No valid moves at all)
             local canMove = false
+            -- Need to redefine isValidOption locally or pass canAdvance
+            local function isValidOption(opt)
+                return canAdvance(opt[1]) or canAdvance(opt[2])
+            end
+
             for _, opt in ipairs(options) do
                 if isValidOption(opt) then canMove = true break end
             end
@@ -283,7 +394,7 @@ local function main()
                     if not tempMarkers[col] then
                         -- New runner
                         runnersUsed = runnersUsed + 1
-                        local start = (currentPlayer == 1) and board[col].p1 or board[col].p2
+                        local start = board[col].positions[currentPlayer]
                         tempMarkers[col] = start + 1
                     else
                         tempMarkers[col] = tempMarkers[col] + 1
@@ -305,8 +416,7 @@ local function main()
                     elseif key == "CENTER" then -- Stop
                         -- Save Progress
                         for col, step in pairs(tempMarkers) do
-                            if currentPlayer == 1 then board[col].p1 = step
-                            else board[col].p2 = step end
+                            board[col].positions[currentPlayer] = step
                             
                             -- Check Column Win
                             if step >= COL_LENGTHS[col] then
@@ -334,7 +444,7 @@ local function main()
         end
         
         -- Switch Player
-        currentPlayer = (currentPlayer == 1) and 2 or 1
+        currentPlayer = (currentPlayer % numPlayers) + 1
     end
     
     if fs.exists("menu.lua") then shell.run("menu.lua") end

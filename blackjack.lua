@@ -271,7 +271,7 @@ local function main()
     term.setBackgroundColor(colors.black)
     term.clear()
     drawCenter(h/2 - 2, "BLACKJACK", colors.lime, colors.black)
-    drawCenter(h/2, "Select Players: 1-4", colors.white, colors.black)
+    drawCenter(h/2, "Select Players: 1-3", colors.white, colors.black)
     drawCenter(h/2 + 2, "[L] -   [C] Start   [R] +", colors.gray, colors.black)
     
     local numPlayers = 1
@@ -282,7 +282,7 @@ local function main()
         term.write("< " .. numPlayers .. " >")
         local key = waitKey()
         if key == "LEFT" and numPlayers > 1 then numPlayers = numPlayers - 1 end
-        if key == "RIGHT" and numPlayers < 4 then numPlayers = numPlayers + 1 end
+        if key == "RIGHT" and numPlayers < 3 then numPlayers = numPlayers + 1 end
         if key == "CENTER" then break end
     end
     
@@ -371,6 +371,8 @@ local creditsAPI = require("credits")
         local dealerScore = calculateHand(dealerHand)
         local dealerBust = dealerScore > 21
         
+        for _, p in ipairs(players) do
+            local pScore = calculateHand(p.hand)
             if p.status == "Bust!" then
                 p.status = "LOSE"
             elseif p.status == "Surrender" then
