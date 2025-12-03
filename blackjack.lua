@@ -95,6 +95,50 @@ end
 -- UI
 --------------------------------------------------------------------------------
 
+
+
+local function animateSparkles(x, y, width, height)
+    local duration = 1.5
+    local startTime = os.clock()
+    local colorsList = {colors.yellow, colors.gold or colors.orange, colors.white}
+    
+    while os.clock() - startTime < duration do
+        local rx = math.random(x, x + width - 1)
+        local ry = math.random(y, y + height - 1)
+        local color = colorsList[math.random(1, #colorsList)]
+        
+        term.setCursorPos(rx, ry)
+        term.setTextColor(color)
+        term.write("*")
+        
+        sleep(0.05)
+    end
+end
+
+local function animateChips(startX, startY, endX, endY)
+    local steps = 10
+    local dx = (endX - startX) / steps
+    local dy = (endY - startY) / steps
+    
+    for i = 1, steps do
+        local cx = math.floor(startX + dx * i)
+        local cy = math.floor(startY + dy * i)
+        
+        -- Draw Chip
+        term.setCursorPos(cx, cy)
+        term.setBackgroundColor(colors.yellow)
+        term.setTextColor(colors.black)
+        term.write("O")
+        
+        sleep(0.05)
+        
+        -- Clear Chip (simple clear, might overwrite background)
+        term.setCursorPos(cx, cy)
+        term.setBackgroundColor(colors.green) -- Assuming table color
+        term.write(" ")
+    end
+end
+
 local function drawText(x, y, text, fg, bg)
     term.setCursorPos(x, y)
     if fg then term.setTextColor(fg) end
@@ -233,8 +277,8 @@ local function drawTable(players, dealerHand, currentPlayerIdx, message, showDea
     
     if currentPlayerIdx == 0 then
         c1 = "-"
-        c2 = "Play Again"
-        c3 = "Exit"
+        c2 = "Deal"
+        c3 = "Cash Out"
     elseif message and string.find(message, "ADV") then
         c1 = "Double"
         c2 = "Surrender"
@@ -275,16 +319,8 @@ local function main()
     drawCenter(h/2 + 2, "[L] -   [C] Start   [R] +", colors.gray, colors.black)
     
     local numPlayers = 1
-    while true do
-        term.setCursorPos(w/2 - 2, h/2 + 1)
-        term.setBackgroundColor(colors.black)
-        term.setTextColor(colors.white)
-        term.write("< " .. numPlayers .. " >")
-        local key = waitKey()
-        if key == "LEFT" and numPlayers > 1 then numPlayers = numPlayers - 1 end
-        if key == "RIGHT" and numPlayers < 3 then numPlayers = numPlayers + 1 end
-        if key == "CENTER" then break end
-    end
+    -- Removed player selection loop
+
     
     local deck = createDeck()
     
@@ -389,6 +425,29 @@ local creditsAPI = require("credits")
                 creditsAPI.add(p.bet)
             else
                 p.status = "LOSE"
+            end
+        end
+        
+        drawTable(players, dealerHand, 0, "Round Over!", true)
+        
+        -- Play Animations for Winners
+        local sectionW = w / #players
+        local playerY = h - 6
+        local dealerX, dealerY = w/2, 3
+        
+        for i, p in ipairs(players) do
+            if p.status == "WIN!" or p.status == "Blackjack!" then
+                local pCenterX = math.floor((i-1)*sectionW + sectionW/2)
+                
+                -- Animate Chips from Dealer to Player
+                animateChips(dealerX, dealerY, pCenterX, playerY)
+                
+                -- Animate Sparkles around Player
+                -- Area: pCenterX - 6 to pCenterX + 6, playerY - 2 to playerY + 4
+                animateSparkles(pCenterX - 6, playerY - 2, 12, 6)
+                
+                -- Redraw table to clean up
+                drawTable(players, dealerHand, 0, "Round Over!", true)
             end
         end
         

@@ -1,39 +1,48 @@
--- credits.lua
--- Unified Credit System API
-
-local CREDITS_FILE = ".credits"
-local DEFAULT_CREDITS = 100
+local CREDITS_FILE = "disk/credits"
+local DEFAULT_CREDITS = 0 -- Default to 0 if no disk/file
 
 local credits = {}
 
 function credits.get()
     if not fs.exists(CREDITS_FILE) then
-        credits.set(DEFAULT_CREDITS)
         return DEFAULT_CREDITS
     end
     
     local f = fs.open(CREDITS_FILE, "r")
-    local amount = tonumber(f.readAll())
+    if not f then return DEFAULT_CREDITS end
+    local content = f.readAll()
     f.close()
     
+    local amount = tonumber(content)
+    
     if not amount then
-        amount = DEFAULT_CREDITS
-        credits.set(amount)
+        return DEFAULT_CREDITS
     end
     
     return amount
 end
 
 function credits.set(amount)
+    -- Only write if the directory exists (disk is present)
+    local dir = fs.getDir(CREDITS_FILE)
+    if not fs.exists(dir) then
+        return false 
+    end
+
     local f = fs.open(CREDITS_FILE, "w")
-    f.write(tostring(math.floor(amount)))
-    f.close()
+    if f then
+        f.write(tostring(math.floor(amount)))
+        f.close()
+        return true
+    end
+    return false
 end
 
 function credits.add(amount)
     local current = credits.get()
-    credits.set(current + amount)
-    return current + amount
+    local newAmount = current + amount
+    credits.set(newAmount)
+    return newAmount
 end
 
 function credits.remove(amount)
