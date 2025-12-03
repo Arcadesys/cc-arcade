@@ -1,151 +1,90 @@
 -- slots.lua
--- A 3-reel, multi-line slot machine for the CC Arcade.
-
-local function loadModule(name)
-    local ok, mod = pcall(require, name)
-    if ok and mod then return mod end
-    local path = name .. ".lua"
-    local chunk, err = loadfile(path)
-    if not chunk then error(err) end
-    return chunk()
-end
-
-local input = loadModule("input")
-
---------------------------------------------------------------------------------
--- CONFIGURATION
---------------------------------------------------------------------------------
-
-local SYMBOLS = {
-    "Cherry", "Lemon", "Orange", "Plum", "Bell", "Bar", "7"
-}
-
-local SYMBOL_COLORS = {
-    Cherry = colors.red,
-    Lemon = colors.yellow,
-    Orange = colors.orange,
-    Plum = colors.purple,
-    Bell = colors.gold or colors.yellow, -- Fallback if gold isn't available
-    Bar = colors.lightGray,
-    ["7"] = colors.red
-}
-
-local SYMBOL_CHARS = {
-    Cherry = "@",
-    Lemon = "O",
-    Orange = "O",
-    Plum = "%",
-    Bell = "A",
-    Bar = "=",
-    ["7"] = "7"
-}
-
-local PAYOUTS = {
-    -- 3 of a kind payouts
-    Cherry = 10,
-    Lemon = 20,
-    Orange = 30,
-    Plum = 50,
-    Bell = 100,
-    Bar = 250,
-    ["7"] = 500
-}
-
--- Cherry also pays on 2 of a kind (any position on line)
-local CHERRY_2_PAYOUT = 5
-
-local REEL_LENGTH = 32
-local REELS = {}
-
--- Generate weighted reels
-local function generateReels()
-    for i = 1, 3 do
-        local strip = {}
-        for _ = 1, REEL_LENGTH do
-            -- Weighted random generation
-            local r = math.random()
-            local sym
-            if r < 0.05 then sym = "7"        -- 5%
-            elseif r < 0.15 then sym = "Bar"  -- 10%
-            elseif r < 0.25 then sym = "Bell" -- 10%
-            elseif r < 0.40 then sym = "Plum" -- 15%
-            elseif r < 0.60 then sym = "Orange" -- 20%
-            elseif r < 0.80 then sym = "Lemon" -- 20%
-            else sym = "Cherry" end           -- 20%
-            table.insert(strip, sym)
-        end
-        REELS[i] = strip
-    end
-end
-
-generateReels()
-
---------------------------------------------------------------------------------
--- STATE
---------------------------------------------------------------------------------
-
-local credits = 100
-local bet = 1 -- 1 to 3 lines
-local reelPos = {1, 1, 1} -- Top visible index for each reel
-local message = "Press DO to Spin!"
-local lastWin = 0
-local isSpinning = false
-local winningLines = {} -- {1=true, 2=true, 3=true}
-
---------------------------------------------------------------------------------
--- GRAPHICS
---------------------------------------------------------------------------------
+-- 3-Button Slot Machine
 
 local w, h = term.getSize()
 local cx, cy = math.floor(w / 2), math.floor(h / 2)
 
-local function drawRect(x, y, width, height, color)
-    term.setBackgroundColor(color)
-    for i = 0, height - 1 do
-        term.setCursorPos(x, y + i)
-        term.write(string.rep(" ", width))
+-- 3-Button Config
+local KEYS = {
+    LEFT = { keys.left, keys.a },
+    CENTER = { keys.up, keys.w, keys.space, keys.enter },
+    RIGHT = { keys.right, keys.d }
+}
+
+local function isKey(key, set)
+    for _, k in ipairs(set) do if key == k then return true end end
+    return false
+end
+
+local function waitKey()
+    while true do
+        local e, p1 = os.pullEvent()
+        if e == "key" then
+            if isKey(p1, KEYS.LEFT) then return "LEFT" end
+            if isKey(p1, KEYS.CENTER) then return "CENTER" end
+            if isKey(p1, KEYS.RIGHT) then return "RIGHT" end
+        elseif e == "redstone" then
+            if redstone.getInput("left") then sleep(0.2) return "LEFT" end
+            if redstone.getInput("top") or redstone.getInput("front") then sleep(0.2) return "CENTER" end
+            if redstone.getInput("right") then sleep(0.2) return "RIGHT" end
+        end
     end
 end
 
-local function drawTextCentered(y, text, fg, bg)
-    term.setTextColor(fg)
-    term.setBackgroundColor(bg)
-    local x = math.floor((w - #text) / 2) + 1
-    term.setCursorPos(x, y)
-    term.write(text)
+--------------------------------------------------------------------------------
+-- GAME CONFIG
+--------------------------------------------------------------------------------
+
+local SYMBOLS = {"Cherry", "Lemon", "Orange", "Plum", "Bell", "Bar", "7"}
+local COLORS = {
+    Cherry = colors.red, Lemon = colors.yellow, Orange = colors.orange,
+    Plum = colors.purple, Bell = colors.gold or colors.yellow,
+    Bar = colors.lightGray, ["7"] = colors.red
+}
+local CHARS = {
+    Cherry = "@", Lemon = "O", Orange = "O", Plum = "%",
+    Bell = "A", Bar = "=", ["7"] = "7"
+}
+local PAYOUTS = {
+    Cherry = 5, Lemon = 10, Orange = 20, Plum = 50,
+    Bell = 100, Bar = 250, ["7"] = 500
+}
+
+local REELS = {}
+for i=1,3 do
+    REELS[i] = {}
+    for j=1,32 do
+        local r = math.random()
+        local s
+        if r < 0.05 then s = "7"
+        elseif r < 0.15 then s = "Bar"
+        elseif r < 0.25 then s = "Bell"
+        elseif r < 0.40 then s = "Plum"
+        elseif r < 0.60 then s = "Orange"
+        elseif r < 0.80 then s = "Lemon"
+        else s = "Cherry" end
+        table.insert(REELS[i], s)
+    end
 end
 
-local function getSymbolAt(reelIdx, offset)
-    local pos = reelPos[reelIdx] + offset
-    -- Wrap around
-    pos = ((pos - 1) % REEL_LENGTH) + 1
-    return REELS[reelIdx][pos]
-end
+local credits = 100
+local bet = 1
+local reelPos = {1, 1, 1}
+local message = "Press [C] to Spin!"
 
-local function drawReel(reelIdx, x, y)
-    -- Draw 3 rows visible
-    for i = 0, 2 do
-        local sym = getSymbolAt(reelIdx, i)
-        local color = SYMBOL_COLORS[sym]
-        local char = SYMBOL_CHARS[sym]
-        
+--------------------------------------------------------------------------------
+-- DRAWING
+--------------------------------------------------------------------------------
+
+local function drawReel(idx, x, y)
+    for i=0,2 do
+        local pos = (reelPos[idx] + i - 1) % #REELS[idx] + 1
+        local sym = REELS[idx][pos]
+        term.setCursorPos(x, y + i*3)
         term.setBackgroundColor(colors.white)
-        term.setTextColor(color)
-        
-        -- Draw symbol box
-        term.setCursorPos(x, y + (i * 4))
-        term.write("      ")
-        term.setCursorPos(x, y + (i * 4) + 1)
-        term.write("  " .. char .. char .. "  ")
-        term.setCursorPos(x, y + (i * 4) + 2)
-        term.write("      ")
-        
-        -- Draw separator
-        if i < 2 then
-            term.setBackgroundColor(colors.black)
-            term.setCursorPos(x, y + (i * 4) + 3)
-            term.write("      ")
-        end
+        term.setTextColor(COLORS[sym])
+        term.write(" " .. CHARS[sym] .. CHARS[sym] .. " ")
+        term.setBackgroundColor(colors.black)
     end
 end
 
@@ -153,126 +92,92 @@ local function drawUI()
     term.setBackgroundColor(colors.black)
     term.clear()
     
-    -- Header
-    drawRect(1, 1, w, 3, colors.blue)
-    drawTextCentered(2, "--- SUPER SLOTS ---", colors.yellow, colors.blue)
-    
-    -- Reel Frame
-    local reelW = 6
-    local spacing = 2
-    local totalW = (reelW * 3) + (spacing * 2)
-    local startX = cx - math.floor(totalW / 2)
-    local startY = 5
-    
-    -- Draw Paylines Indicators
-    local lineColors = {colors.red, colors.white, colors.red} -- Top, Center, Bottom
-    if bet >= 1 then
-        term.setTextColor(colors.red)
-        term.setCursorPos(startX - 2, startY + 5) -- Center line
-        term.write(">")
-        term.setCursorPos(startX + totalW + 2, startY + 5)
-        term.write("<")
-    end
-    if bet >= 2 then
-        term.setTextColor(colors.red)
-        term.setCursorPos(startX - 2, startY + 1) -- Top line
-        term.write(">")
-        term.setCursorPos(startX + totalW + 2, startY + 1)
-        term.write("<")
-    end
-    if bet >= 3 then
-        term.setTextColor(colors.red)
-        term.setCursorPos(startX - 2, startY + 9) -- Bottom line
-        term.write(">")
-        term.setCursorPos(startX + totalW + 2, startY + 9)
-        term.write("<")
-    end
+    term.setCursorPos(1, 1)
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.yellow)
+    term.clearLine()
+    term.setCursorPos(2, 1)
+    term.write("SUPER SLOTS")
     
     -- Draw Reels
-    for i = 1, 3 do
-        local rx = startX + (i - 1) * (reelW + spacing)
-        drawReel(i, rx, startY)
+    local startX = cx - 8
+    local startY = cy - 4
+    for i=1,3 do
+        drawReel(i, startX + (i-1)*6, startY)
     end
     
-    -- Footer Info
-    local footerY = h - 2
+    -- Paylines
     term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.white)
-    term.setCursorPos(2, footerY)
-    term.write("Credits: " .. credits)
+    term.setTextColor(colors.red)
+    if bet >= 1 then term.setCursorPos(startX-2, startY+4) term.write(">") end -- Center
+    if bet >= 2 then term.setCursorPos(startX-2, startY+1) term.write(">") end -- Top
+    if bet >= 3 then term.setCursorPos(startX-2, startY+7) term.write(">") end -- Bottom
     
-    term.setCursorPos(w - 12, footerY)
+    -- Info
+    term.setCursorPos(2, h-2)
+    term.setTextColor(colors.white)
+    term.write("Credits: " .. credits)
+    term.setCursorPos(w-10, h-2)
     term.write("Bet: " .. bet)
     
-    drawTextCentered(footerY + 1, message, colors.yellow, colors.black)
+    term.setCursorPos(1, h)
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.black)
+    term.clearLine()
+    term.write(" [L] Bet   [C] Spin   [R] Exit")
     
-    -- Win Highlight
-    if lastWin > 0 then
-        drawTextCentered(4, "WIN: " .. lastWin, colors.lime, colors.black)
-    end
+    term.setCursorPos(2, h-4)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.yellow)
+    term.write(message)
 end
 
---------------------------------------------------------------------------------
--- LOGIC
---------------------------------------------------------------------------------
-
---------------------------------------------------------------------------------
--- LOGIC
---------------------------------------------------------------------------------
-
-local isLeverActive = false
-
-local function checkWin()
-    local totalWin = 0
-    winningLines = {}
+local function spin()
+    if credits < bet then
+        message = "Not enough credits!"
+        return
+    end
+    credits = credits - bet
+    message = "Spinning..."
     
-    -- Helper to check a line (offset 0=top, 1=center, 2=bottom)
-    local function checkLine(offset)
-        local s1 = getSymbolAt(1, offset)
-        local s2 = getSymbolAt(2, offset)
-        local s3 = getSymbolAt(3, offset)
-        
-        if s1 == s2 and s2 == s3 then
-            return PAYOUTS[s1] or 0
-        elseif s1 == "Cherry" and s2 == "Cherry" then
-            return CHERRY_2_PAYOUT
+    -- Animation
+    for i=1,20 do
+        for r=1,3 do reelPos[r] = (reelPos[r] % #REELS[r]) + 1 end
+        drawUI()
+        sleep(0.05)
+    end
+    
+    -- Stop one by one
+    for r=1,3 do
+        for i=1,10 do
+            reelPos[r] = (reelPos[r] % #REELS[r]) + 1
+            for k=r+1,3 do reelPos[k] = (reelPos[k] % #REELS[k]) + 1 end
+            drawUI()
+            sleep(0.05 + i*0.01)
         end
+    end
+    
+    -- Check Win
+    local win = 0
+    local function getSym(r, offset)
+        return REELS[r][(reelPos[r] + offset - 1) % #REELS[r] + 1]
+    end
+    
+    local function checkLine(offset)
+        local s1, s2, s3 = getSym(1, offset), getSym(2, offset), getSym(3, offset)
+        if s1 == s2 and s2 == s3 then return PAYOUTS[s1] end
+        if s1 == "Cherry" and s2 == "Cherry" then return 5 end
         return 0
     end
     
-    -- Line 1: Center (Always active if bet >= 1)
-    if bet >= 1 then
-        local win = checkLine(1)
-        if win > 0 then
-            totalWin = totalWin + win
-            winningLines[1] = true
-        end
-    end
+    if bet >= 1 then win = win + checkLine(1) end -- Center (offset 1)
+    if bet >= 2 then win = win + checkLine(0) end -- Top (offset 0)
+    if bet >= 3 then win = win + checkLine(2) end -- Bottom (offset 2)
     
-    -- Line 2: Top (Active if bet >= 2)
-    if bet >= 2 then
-        local win = checkLine(0)
-        if win > 0 then
-            totalWin = totalWin + win
-            winningLines[2] = true
-        end
-    end
-    
-    -- Line 3: Bottom (Active if bet >= 3)
-    if bet >= 3 then
-        local win = checkLine(2)
-        if win > 0 then
-            totalWin = totalWin + win
-            winningLines[3] = true
-        end
-    end
-    
-    if totalWin > 0 then
-        credits = credits + totalWin
-        lastWin = totalWin
-        message = "WINNER!"
-        -- Flash effect
-        for _=1,3 do
+    if win > 0 then
+        credits = credits + win
+        message = "WINNER! " .. win
+        for i=1,3 do
             term.setBackgroundColor(colors.lime)
             term.clear()
             sleep(0.1)
@@ -284,155 +189,20 @@ local function checkWin()
     end
 end
 
-local function startSpinning()
-    if credits < bet then
-        message = "Not enough credits!"
-        return false
-    end
-    
-    credits = credits - bet
-    lastWin = 0
-    winningLines = {}
-    isSpinning = true
-    message = "Spinning..."
-    return true
-end
-
-local function stopSpinning()
-    isSpinning = false
-    
-    -- Landing animation
-    local stopReel = 0
-    local spins = 0
-    
-    while stopReel < 3 do
-        -- Update spinning reels
-        for i = 1, 3 do
-            if i > stopReel then
-                reelPos[i] = (reelPos[i] % REEL_LENGTH) + 1
-            end
-        end
-        
-        drawUI()
-        sleep(0.05)
-        
-        spins = spins + 1
-        if spins > 10 and stopReel == 0 then stopReel = 1 spins = 0 end
-        if spins > 10 and stopReel == 1 then stopReel = 2 spins = 0 end
-        if spins > 15 and stopReel == 2 then stopReel = 3 end
-    end
-    
-    checkWin()
-end
-
---------------------------------------------------------------------------------
--- INPUT HANDLING
---------------------------------------------------------------------------------
-
-local buttons = {
-    [1] = { side = "left",   label = "Bet -" },
-    [2] = { side = "right",  label = "Bet +" },
-    [3] = { side = "top",    label = "Spin" },
-    [4] = { side = "front",  label = "Max Bet" },
-    [5] = { side = "bottom", label = "Exit" },
-}
-
-local keyToButton = {
-    [keys.a] = 1,
-    [keys.s] = 2,
-    [keys.d] = 3,
-    [keys.f] = 4,
-    [keys.g] = 5,
-    [keys.q] = 5,
-    [keys.enter] = 3,
-    [keys.space] = 3,
-    [keys.up] = 2,
-    [keys.down] = 1,
-}
-
-local lastState = {}
-for i, btn in ipairs(buttons) do
-    lastState[i] = redstone.getInput(btn.side)
-end
-
-local function pollRedstone()
-    local pressedIndex = nil
-    for i, btn in ipairs(buttons) do
-        local newState = redstone.getInput(btn.side)
-        if newState and not lastState[i] then
-            pressedIndex = i
-        end
-        lastState[i] = newState
-    end
-    return pressedIndex
-end
-
-local function handleInput(btnIdx)
-    if btnIdx == 1 then -- Bet -
-        if not isSpinning and bet > 1 then 
-            bet = bet - 1 
-            message = "Bet: " .. bet
-        end
-    elseif btnIdx == 2 then -- Bet +
-        if not isSpinning and bet < 3 then 
-            bet = bet + 1 
-            message = "Bet: " .. bet
-        end
-    elseif btnIdx == 3 then -- Spin
-        if not isSpinning then
-            if startSpinning() then
-                stopSpinning()
-            end
-        end
-    elseif btnIdx == 4 then -- Max Bet
-        if not isSpinning then
-            bet = 3
-            message = "Max Bet!"
-            if startSpinning() then
-                stopSpinning()
-            end
-        end
-    elseif btnIdx == 5 then -- Exit
-        return "exit"
-    end
-end
-
-local function drawControls()
-    local y = h
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.gray)
-    term.setCursorPos(1, y)
-    term.write("Controls: [1]Bet- [2]Bet+ [3]Spin [4]Max [5]Exit")
-end
-
 local function main()
-    -- Enable redstone events
-    os.pullEvent = os.pullEventRaw 
-    
     while true do
         drawUI()
-        drawControls()
+        local action = waitKey()
         
-        local event, p1 = os.pullEvent()
-        local pressed = nil
-        
-        if event == "key" then
-            pressed = keyToButton[p1]
-        elseif event == "redstone" then
-            pressed = pollRedstone()
-        end
-        
-        if pressed then
-            local action = handleInput(pressed)
-            if action == "exit" then
-                term.setBackgroundColor(colors.black)
-                term.clear()
-                term.setCursorPos(1,1)
-                print("Thanks for playing!")
-                return
-            end
+        if action == "LEFT" then
+            bet = (bet % 3) + 1
+        elseif action == "CENTER" then
+            spin()
+        elseif action == "RIGHT" then
+            break
         end
     end
+    if fs.exists("menu.lua") then shell.run("menu.lua") end
 end
 
 main()

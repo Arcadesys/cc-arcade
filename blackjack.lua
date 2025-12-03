@@ -1,428 +1,363 @@
----@diagnostic disable: undefined-global, undefined-field
-package.loaded["arcade"] = nil
+-- blackjack.lua
+-- Sequential Multiplayer Blackjack for Arcade OS
+-- Visual Overhaul
 
-local function detectProgramPath()
-    if shell and shell.getRunningProgram then
-        return shell.getRunningProgram()
-    end
-    if debug and debug.getinfo then
-        local info = debug.getinfo(2, "S") -- caller (setupPaths)
-        if not info then info = debug.getinfo(1, "S") end
-        if info and info.source then
-            local src = info.source
-            if src:sub(1, 1) == "@" then src = src:sub(2) end
-            return src
-        end
-    end
-    return nil
-end
+local w, h = term.getSize()
+local SUITS = {"H", "D", "C", "S"}
+local RANKS = {"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"}
 
-local function setupPaths()
-    local program = detectProgramPath()
-    if not program then return end
-    local dir = fs.getDir(program)
-    local boot = fs.combine(fs.getDir(dir), "boot.lua")
-    if fs.exists(boot) then dofile(boot) end
-end
+-- Colors
+local C_TABLE = colors.green
+local C_TEXT = colors.white
+local C_CARD_BG = colors.white
+local C_CARD_RED = colors.red
+local C_CARD_BLK = colors.black
+local C_HIDDEN = colors.red
+local C_LABEL = colors.yellow
+local C_MSG = colors.cyan
 
-setupPaths()
+-- Card Dimensions
+local CARD_W = 4
+local CARD_H = 3
 
-local arcade = require("games.arcade")
-
-local suits = {"S", "H", "C", "D"}
-local ranks = {
-    {label = "A", value = 11},
-    {label = "2", value = 2}, {label = "3", value = 3}, {label = "4", value = 4}, {label = "5", value = 5},
-    {label = "6", value = 6}, {label = "7", value = 7}, {label = "8", value = 8}, {label = "9", value = 9},
-    {label = "10", value = 10}, {label = "J", value = 10}, {label = "Q", value = 10}, {label = "K", value = 10}
+-- 3-Button Config
+local KEYS = {
+    LEFT = { keys.left, keys.a, keys.q },
+    CENTER = { keys.up, keys.w, keys.space, keys.enter },
+    RIGHT = { keys.right, keys.d, keys.e }
 }
 
-local shoe = {}
-local shoeDecks = 4
-local playerHand, dealerHand = {}, {}
-local baseBet = 1
-local activeWager = 0
-local phase = "betting"
-local statusMessage = "Adjust bet then deal"
-local adapter = nil
-local revealTimer = 0
-local revealDelay = 0.35
-local dealQueue = {}
-local dealerHoleRevealed = false
-local playerHasActed = false
-local screenDirty = true
-
-local function shuffle(list)
-    for i = #list, 2, -1 do
-        local j = math.random(i)
-        list[i], list[j] = list[j], list[i]
-    end
-end
-
-local function buildShoe()
-    shoe = {}
-    for _ = 1, shoeDecks do
-        for _, suit in ipairs(suits) do
-            for _, rank in ipairs(ranks) do
-                table.insert(shoe, {label = rank.label, value = rank.value, suit = suit})
-            end
-        end
-    end
-    shuffle(shoe)
-end
-
-local function drawCard()
-    if #shoe == 0 then buildShoe() end
-    return table.remove(shoe)
-end
-
-local function handTotal(hand)
-    local total, aces = 0, 0
-    for _, card in ipairs(hand) do
-        total = total + card.value
-        if card.label == "A" then aces = aces + 1 end
-    end
-    while total > 21 and aces > 0 do
-        total = total - 10
-        aces = aces - 1
-    end
-    return total
-end
-
-local function visibleDealerTotal(hand)
-    local total, aces = 0, 0
-    for _, card in ipairs(hand) do
-        if not card.hidden then
-            total = total + card.value
-            if card.label == "A" then aces = aces + 1 end
-        end
-    end
-    while total > 21 and aces > 0 do
-        total = total - 10
-        aces = aces - 1
-    end
-    return total
-end
-
-local function formatCard(card, hide)
-    if hide then return "[??]" end
-    return string.format("[%s%s]", card.label, card.suit)
-end
-
-local function cardLine(hand, reveal)
-    local bits = {}
-    for i, card in ipairs(hand) do
-        local hide = card.hidden and not reveal
-        bits[i] = formatCard(card, hide)
-    end
-    return table.concat(bits, " ")
-end
-
-local function setButtonsForPhase()
-    if not adapter then return end
-    if phase == "betting" then
-        adapter:setButtons({"Bet -", "Deal", "Bet +"})
-    elseif phase == "player" then
-        local canDouble = (not playerHasActed) and adapter:getCredits() >= activeWager
-        adapter:setButtons({"Hit", "Stand", "Double"}, {true, true, canDouble})
-    elseif phase == "roundEnd" then
-        adapter:setButtons({"Bet -", "New", "Bet +"})
-    else
-        adapter:setButtons({"", "...", ""}, {false, false, false})
-    end
-end
-
-local function resetRoundState()
-    playerHand, dealerHand = {}, {}
-    activeWager = 0
-    dealQueue = {}
-    phase = "betting"
-    statusMessage = "Adjust bet then deal"
-    dealerHoleRevealed = false
-    playerHasActed = false
-    revealTimer = 0
-    screenDirty = true
-    setButtonsForPhase()
-end
-
-local function isBlackjack(hand)
-    return #hand == 2 and handTotal(hand) == 21
-end
-
-local function setPhase(newPhase)
-    phase = newPhase
-    setButtonsForPhase()
-    screenDirty = true
-end
-
-local function payout(amount)
-    if amount > 0 and adapter then adapter:addCredits(amount) end
-end
-
-local function endRound(outcome)
-    local totalPlayer = handTotal(playerHand)
-    local totalDealer = handTotal(dealerHand)
-    local label = outcome
-    if outcome == "playerBlackjack" then
-        local award = math.floor(activeWager * 2.5)
-        payout(award)
-        label = string.format("Blackjack! Paid %d", award)
-    elseif outcome == "playerWin" or outcome == "dealerBust" then
-        payout(activeWager * 2)
-        label = string.format("You win! Paid %d", activeWager * 2)
-    elseif outcome == "push" then
-        payout(activeWager)
-        label = string.format("Push. Returned %d", activeWager)
-    else
-        label = "Dealer wins"
-    end
-    statusMessage = string.format("%s (You %d / Dealer %d)", label, totalPlayer, totalDealer)
-    setPhase("roundEnd")
-end
-
-local function evaluateAfterPlayerStands()
-    local playerTotal = handTotal(playerHand)
-    local dealerTotal = handTotal(dealerHand)
-    if dealerTotal > 21 then
-        endRound("dealerBust")
-    elseif dealerTotal < playerTotal then
-        endRound("playerWin")
-    elseif dealerTotal > playerTotal then
-        endRound("dealerWin")
-    else
-        endRound("push")
-    end
-end
-
-local function revealDealerHole()
-    for _, card in ipairs(dealerHand) do
-        if card.hidden then card.hidden = false end
-    end
-    dealerHoleRevealed = true
-    screenDirty = true
-end
-
-local function startDealerTurn()
-    revealDealerHole()
-    setPhase("dealer")
-    statusMessage = "Dealer drawing..."
-    revealTimer = 0
-end
-
-local function resolveForBlackjack()
-    local playerBJ = isBlackjack(playerHand)
-    local dealerBJ = isBlackjack(dealerHand)
-    if playerBJ or dealerBJ then
-        revealDealerHole()
-        if playerBJ and dealerBJ then
-            endRound("push")
-        elseif playerBJ then
-            endRound("playerBlackjack")
-        else
-            endRound("dealerWin")
-        end
-        return true
-    end
+local function isKey(key, set)
+    for _, k in ipairs(set) do if key == k then return true end end
     return false
 end
 
-local function queueInitialDeal()
-    dealQueue = {"player", "dealer", "player", "dealer"}
-    setPhase("dealing")
-    statusMessage = "Dealing..."
-    revealTimer = 0
-end
-
-local function dealTo(target)
-    local card = drawCard()
-    if target == "dealer" and #dealerHand == 1 then
-        card.hidden = true
-    end
-    if target == "player" then
-        table.insert(playerHand, card)
-    else
-        table.insert(dealerHand, card)
-    end
-    screenDirty = true
-end
-
-local function drawHud(a)
-    a:clearPlayfield(colors.green, colors.white)
-    a:centerPrint(1, "Blackjack", colors.white, colors.green)
-    a:centerPrint(2, string.format("Credits: %d   Bet: %d   Shoe: %d", a:getCredits(), baseBet, #shoe))
-    local wagerLine = activeWager > 0 and ("Wager in play: " .. activeWager) or "Waiting for next hand"
-    a:centerPrint(3, wagerLine, colors.lightGray)
-
-    a:centerPrint(5, "Dealer", colors.white)
-    a:centerPrint(6, cardLine(dealerHand, dealerHoleRevealed or (phase ~= "dealing" and phase ~= "player")), colors.white)
-    local dealerTotalText = "Total: "
-    if dealerHoleRevealed or phase == "roundEnd" or phase == "dealer" then
-        dealerTotalText = dealerTotalText .. tostring(handTotal(dealerHand))
-    else
-        dealerTotalText = dealerTotalText .. tostring(visibleDealerTotal(dealerHand)) .. " + ?"
-    end
-    a:centerPrint(7, dealerTotalText, colors.lightGray)
-
-    a:centerPrint(9, "Player", colors.white)
-    a:centerPrint(10, cardLine(playerHand, true), colors.white)
-    a:centerPrint(11, "Total: " .. tostring(handTotal(playerHand)), colors.lightGray)
-
-    a:centerPrint(13, statusMessage or " ", colors.yellow)
-    a:centerPrint(15, "Keys: 1/2/3 or buttons. Q to quit.", colors.gray)
-end
-
-local function redraw()
-    if adapter then
-        drawHud(adapter)
-        screenDirty = false
-    end
-end
-
-local function startRound()
-    if not adapter then return end
-    if adapter:consumeCredits(baseBet) then
-        resetRoundState()
-        activeWager = baseBet
-        queueInitialDeal()
-    else
-        statusMessage = "Not enough credits for that bet"
-        setPhase("betting")
-    end
-end
-
-local function playerHit()
-    dealTo("player")
-    local total = handTotal(playerHand)
-    playerHasActed = true
-    if total > 21 then
-        statusMessage = "Bust!"
-        revealDealerHole()
-        endRound("dealerWin")
-    else
-        statusMessage = "Hit or stand"
-        setPhase("player")
-    end
-end
-
-local function playerStand()
-    playerHasActed = true
-    startDealerTurn()
-end
-
-local function playerDouble()
-    if adapter:consumeCredits(activeWager) then
-        activeWager = activeWager * 2
-        dealTo("player")
-        playerHasActed = true
-        if handTotal(playerHand) > 21 then
-            statusMessage = "Double bust"
-            revealDealerHole()
-            endRound("dealerWin")
-        else
-            startDealerTurn()
+local function waitKey()
+    while true do
+        local e, p1 = os.pullEvent()
+        if e == "key" then
+            if isKey(p1, KEYS.LEFT) then return "LEFT" end
+            if isKey(p1, KEYS.CENTER) then return "CENTER" end
+            if isKey(p1, KEYS.RIGHT) then return "RIGHT" end
+        elseif e == "redstone" then
+            if redstone.getInput("left") then sleep(0.2) return "LEFT" end
+            if redstone.getInput("top") or redstone.getInput("front") then sleep(0.2) return "CENTER" end
+            if redstone.getInput("right") then sleep(0.2) return "RIGHT" end
         end
-    else
-        statusMessage = "Need more credits to double"
     end
 end
 
-local function adjustBet(delta)
-    baseBet = math.max(1, math.min(100, baseBet + delta))
-    statusMessage = "Bet set to " .. baseBet
-    screenDirty = true
+--------------------------------------------------------------------------------
+-- GAME LOGIC
+--------------------------------------------------------------------------------
+
+local function createDeck()
+    local deck = {}
+    for _, s in ipairs(SUITS) do
+        for _, r in ipairs(RANKS) do
+            table.insert(deck, {suit=s, rank=r})
+        end
+    end
+    -- Shuffle
+    for i = #deck, 2, -1 do
+        local j = math.random(i)
+        deck[i], deck[j] = deck[j], deck[i]
+    end
+    return deck
 end
 
-local function advanceDealing(dt)
-    if #dealQueue == 0 then return end
-    revealTimer = revealTimer + dt
-    if revealTimer >= revealDelay then
-        revealTimer = 0
-        local target = table.remove(dealQueue, 1)
-        dealTo(target)
-        if #dealQueue == 0 then
-            if not resolveForBlackjack() then
-                setPhase("player")
-                statusMessage = "Hit or stand"
+local function getCardValue(card)
+    if card.rank == "A" then return 11 end
+    if card.rank == "K" or card.rank == "Q" or card.rank == "J" then return 10 end
+    return tonumber(card.rank)
+end
+
+local function calculateHand(hand)
+    local total = 0
+    local aces = 0
+    for _, card in ipairs(hand) do
+        total = total + getCardValue(card)
+        if card.rank == "A" then aces = aces + 1 end
+    end
+    while total > 21 and aces > 0 do
+        total = total - 10
+        aces = aces - 1
+    end
+    return total
+end
+
+local function drawCardDeck(deck)
+    if #deck == 0 then deck = createDeck() end -- Reshuffle if empty
+    return table.remove(deck, 1)
+end
+
+--------------------------------------------------------------------------------
+-- UI
+--------------------------------------------------------------------------------
+
+local function drawText(x, y, text, fg, bg)
+    term.setCursorPos(x, y)
+    if fg then term.setTextColor(fg) end
+    if bg then term.setBackgroundColor(bg) end
+    term.write(text)
+end
+
+local function drawCenter(y, text, fg, bg)
+    local x = math.floor((w - #text)/2) + 1
+    drawText(x, y, text, fg, bg)
+end
+
+local function getSuitColor(suit)
+    if suit == "H" or suit == "D" then return C_CARD_RED else return C_CARD_BLK end
+end
+
+local function getSuitChar(suit)
+    -- If using a font that supports symbols, we could use them.
+    -- Standard CC font doesn't have suit symbols, so we use letters.
+    return suit
+end
+
+local function drawGraphicalCard(x, y, card, hidden)
+    -- Card Background
+    term.setBackgroundColor(hidden and C_HIDDEN or C_CARD_BG)
+    
+    for i=0, CARD_H-1 do
+        term.setCursorPos(x, y+i)
+        term.write(string.rep(" ", CARD_W))
+    end
+    
+    if hidden then
+        -- Pattern for hidden card
+        term.setTextColor(colors.white)
+        term.setCursorPos(x, y+1)
+        term.write(" ?? ")
+    else
+        -- Rank and Suit
+        local sColor = getSuitColor(card.suit)
+        term.setTextColor(sColor)
+        
+        local rankStr = card.rank
+        if #rankStr == 1 then rankStr = rankStr .. " " end
+        
+        -- Top Left
+        term.setCursorPos(x, y)
+        term.write(rankStr)
+        
+        -- Center Suit
+        term.setCursorPos(x+1, y+1)
+        term.write(getSuitChar(card.suit))
+        
+        -- Bottom Right (Rotated/Inverted conceptually, but just text here)
+        term.setCursorPos(x+CARD_W-#rankStr, y+CARD_H-1)
+        term.write(rankStr)
+    end
+end
+
+local function drawHandGraphical(centerX, y, name, hand, hideFirst, isActive, status)
+    -- Calculate total width of hand to center it
+    -- Overlap cards by 1 column if hand is large?
+    -- Let's do simple spacing: CARD_W + 1
+    local spacing = CARD_W + 1
+    local totalW = (#hand * spacing) - 1
+    local startX = math.floor(centerX - totalW/2)
+    
+    -- Draw Name Label
+    local labelColor = isActive and colors.yellow or colors.lightGray
+    drawText(startX, y - 1, name, labelColor, C_TABLE)
+    
+    -- Draw Status if present
+    if status and status ~= "Playing" then
+        local sColor = colors.lightGray
+        if status == "Blackjack!" or string.find(status, "WIN") then sColor = colors.gold or colors.orange end
+        if status == "Bust!" or string.find(status, "LOSE") then sColor = colors.red end
+        drawText(startX + #name + 2, y - 1, status, sColor, C_TABLE)
+    end
+    
+    -- Draw Cards
+    for i, card in ipairs(hand) do
+        local cx = startX + (i-1)*spacing
+        local isHidden = hideFirst and (i == 1)
+        drawGraphicalCard(cx, y, card, isHidden)
+    end
+    
+    -- Draw Score
+    if not hideFirst then
+        local score = calculateHand(hand)
+        drawText(startX, y + CARD_H, "Score: " .. score, colors.gray, C_TABLE)
+    end
+end
+
+local function drawTable(players, dealerHand, currentPlayerIdx, message, showDealer)
+    term.setBackgroundColor(C_TABLE)
+    term.clear()
+    
+    -- Header
+    drawCenter(1, " BLACKJACK ", colors.black, colors.lime)
+    
+    -- Dealer Area (Top Center)
+    local dealerY = 3
+    drawHandGraphical(w/2, dealerY, "DEALER", dealerHand, not showDealer, false, nil)
+    
+    -- Player Area (Bottom)
+    -- Distribute players evenly
+    local playerY = h - 6 -- Leave room for controls
+    local sectionW = w / #players
+    
+    for i, p in ipairs(players) do
+        local pCenterX = (i-1)*sectionW + sectionW/2
+        local isActive = (i == currentPlayerIdx)
+        -- Add indicator if active
+        if isActive then
+            drawText(math.floor(pCenterX)-2, playerY-2, " vvv ", colors.white, C_TABLE)
+        end
+        drawHandGraphical(pCenterX, playerY, "P"..i, p.hand, false, isActive, p.status)
+    end
+    
+    -- Message / Controls Area (Bottom 2 lines)
+    local footerY = h - 1
+    term.setBackgroundColor(colors.black)
+    term.setCursorPos(1, h-1)
+    term.clearLine()
+    term.setCursorPos(1, h)
+    term.clearLine()
+    
+    if message then
+        drawCenter(h-1, message, C_MSG, colors.black)
+    end
+    
+    term.setCursorPos(1, h)
+    term.setTextColor(colors.white)
+    if currentPlayerIdx > 0 then
+        term.write(" [L] Hit   [C] Stand   [R] Shift >")
+    else
+        term.write(" [C] Play Again   [R] Exit")
+    end
+end
+
+--------------------------------------------------------------------------------
+-- MAIN LOOP
+--------------------------------------------------------------------------------
+
+local function main()
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    drawCenter(h/2 - 2, "BLACKJACK", colors.lime, colors.black)
+    drawCenter(h/2, "Select Players: 1-4", colors.white, colors.black)
+    drawCenter(h/2 + 2, "[L] -   [C] Start   [R] +", colors.gray, colors.black)
+    
+    local numPlayers = 1
+    while true do
+        term.setCursorPos(w/2 - 2, h/2 + 1)
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.white)
+        term.write("< " .. numPlayers .. " >")
+        local key = waitKey()
+        if key == "LEFT" and numPlayers > 1 then numPlayers = numPlayers - 1 end
+        if key == "RIGHT" and numPlayers < 4 then numPlayers = numPlayers + 1 end
+        if key == "CENTER" then break end
+    end
+    
+    local deck = createDeck()
+    
+    while true do
+        -- New Round
+        local players = {}
+        for i=1, numPlayers do
+            table.insert(players, {hand={}, status="Playing", bet=10})
+        end
+        local dealerHand = {}
+        
+        -- Initial Deal
+        for _=1,2 do
+            for _, p in ipairs(players) do table.insert(p.hand, drawCardDeck(deck)) end
+            table.insert(dealerHand, drawCardDeck(deck))
+        end
+        
+        -- Player Turns
+        for i, p in ipairs(players) do
+            while true do
+                local score = calculateHand(p.hand)
+                if score == 21 then
+                    p.status = "Blackjack!"
+                    break
+                elseif score > 21 then
+                    p.status = "Bust!"
+                    break
+                end
+                
+                drawTable(players, dealerHand, i, "Player " .. i .. "'s Turn", false)
+                local action = waitKey()
+                
+                -- Normal Mode
+                if action == "LEFT" then -- Hit
+                    table.insert(p.hand, drawCardDeck(deck))
+                elseif action == "CENTER" then -- Stand
+                    p.status = "Stand"
+                    break
+                elseif action == "RIGHT" then -- Shift (Advanced Mode)
+                    -- Show Advanced Options
+                    drawTable(players, dealerHand, i, "ADV: [L] Dbl [C] Surr [R] Back", false)
+                    local advAction = waitKey()
+                    
+                    if advAction == "LEFT" then -- Double Down
+                        table.insert(p.hand, drawCardDeck(deck))
+                        score = calculateHand(p.hand)
+                        if score > 21 then p.status = "Bust!" else p.status = "Dbl Stand" end
+                        break
+                    elseif advAction == "CENTER" then -- Surrender
+                         p.status = "Surrender"
+                         break
+                    elseif advAction == "RIGHT" then -- Back
+                        -- Loop continues
+                    end
+                end
+            end
+            drawTable(players, dealerHand, i, "Player " .. i .. " Done", false)
+            sleep(0.5)
+        end
+        
+        -- Dealer Turn
+        drawTable(players, dealerHand, 0, "Dealer's Turn...", true)
+        sleep(1)
+        while calculateHand(dealerHand) < 17 do
+            table.insert(dealerHand, drawCardDeck(deck))
+            drawTable(players, dealerHand, 0, "Dealer Hits...", true)
+            sleep(1)
+        end
+        
+        -- Resolve
+        local dealerScore = calculateHand(dealerHand)
+        local dealerBust = dealerScore > 21
+        
+        for i, p in ipairs(players) do
+            local pScore = calculateHand(p.hand)
+            if p.status == "Bust!" then
+                p.status = "LOSE"
+            elseif p.status == "Surrender" then
+                p.status = "SURRENDER"
+            elseif dealerBust then
+                p.status = "WIN!"
+            elseif pScore > dealerScore then
+                p.status = "WIN!"
+            elseif pScore == dealerScore then
+                p.status = "PUSH"
+            else
+                p.status = "LOSE"
             end
         end
+        
+        drawTable(players, dealerHand, 0, "Round Over!", true)
+        
+        local endAction = waitKey()
+        if endAction == "RIGHT" then
+            break
+        end
     end
+    
+    -- Exit to Menu
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    if fs.exists("menu.lua") then shell.run("menu.lua") end
 end
 
-local function advanceDealer(dt)
-    revealTimer = revealTimer + dt
-    if not dealerHoleRevealed and revealTimer >= revealDelay then
-        revealTimer = 0
-        revealDealerHole()
-        screenDirty = true
-        return
-    end
-    if revealTimer < revealDelay then return end
-    local total = handTotal(dealerHand)
-    if total < 17 then
-        revealTimer = 0
-        dealTo("dealer")
-    else
-        revealTimer = 0
-        evaluateAfterPlayerStands()
-    end
-end
-
-local function onButton(a, which)
-    adapter = a
-    if phase == "betting" then
-        if which == "left" then
-            adjustBet(-1)
-        elseif which == "center" then
-            startRound()
-        elseif which == "right" then
-            adjustBet(1)
-        end
-    elseif phase == "player" then
-        if which == "left" then
-            playerHit()
-        elseif which == "center" then
-            playerStand()
-        elseif which == "right" then
-            playerDouble()
-        end
-    elseif phase == "roundEnd" then
-        if which == "left" then
-            adjustBet(-1)
-        elseif which == "center" then
-            resetRoundState()
-        elseif which == "right" then
-            adjustBet(1)
-        end
-    end
-    redraw()
-end
-
-local game = {
-    name = "Blackjack",
-    init = function(a)
-        math.randomseed(os.time())
-        adapter = a
-        buildShoe()
-        resetRoundState()
-        setButtonsForPhase()
-        redraw()
-    end,
-    draw = function(a)
-        adapter = a
-        redraw()
-    end,
-    onButton = function(a, which)
-        onButton(a, which)
-    end,
-    onTick = function(a, dt)
-        adapter = a
-        if phase == "dealing" then
-            advanceDealing(dt)
-        elseif phase == "dealer" then
-            advanceDealer(dt)
-        end
-        if screenDirty then redraw() end
-    end,
-}
-
-arcade.start(game)
+main()
