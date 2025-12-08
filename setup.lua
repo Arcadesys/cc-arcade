@@ -4,10 +4,12 @@
 
 local games = {
     { name = "Blackjack", cmd = "blackjack" },
+    { name = "Baccarat", cmd = "baccarat" },
     { name = "Super Slots", cmd = "slots" },
     { name = "Can't Stop", cmd = "cant_stop" },
     { name = "RPS Rogue", cmd = "rps_rogue" },
-    { name = "Exchange", cmd = "exchange" }
+    { name = "Exchange", cmd = "exchange" },
+    { name = "Cashier System", cmd = "cashier" }
 }
 
 local selected = 1

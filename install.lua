@@ -79,6 +79,31 @@ function audio.playChip()
     play("hat", 1, 12)
 end
 
+function audio.playCashRegister()
+    -- Cha-ching!
+    if not speaker then return end
+    play("bell", 2, 12)
+    sleep(0.1)
+    play("bell", 2, 16)
+end
+
+function audio.playCoinDispense()
+    -- Clinking coins
+    if not speaker then return end
+    for i = 1, 3 do
+        play("bit", 1, 20 + math.random(-2, 2))
+        sleep(0.05)
+    end
+end
+
+function audio.playError()
+    -- Error buzzer
+    if not speaker then return end
+    play("bass", 2, 6)
+    sleep(0.1)
+    play("bass", 2, 6)
+end
+
 return audio
 
 ]])
@@ -1062,107 +1087,698 @@ main()
 
 writeFile('cashier.lua', [[
 -- cashier.lua
--- Helper program to issue Arcade Credit Cards (Floppy Disks)
+-- Arcade Cashier System
+-- Handles Credit Cards (Floppy Disks) and Currency Exchange
 
+local input = require("input")
+local credits = require("credits")
+local audio = require("audio")
+
+-- === CONFIGURATION ===
+local RATES_INPUT = {
+    ["minecraft:diamond"] = 1,
+    ["minecraft:obsidian"] = 4,
+    ["minecraft:ender_eye"] = 16
+}
+
+local RATES_OUTPUT = {
+    ["minecraft:diamond"] = 1,
+    ["minecraft:ender_pearl"] = 16
+}
+
+local SCREENSAVER_TIMEOUT = 10 -- Seconds of inactivity before screensaver
+local SCREENSAVER_DIR = "screensavers"
+
+-- === PERIPHERALS ===
 local drive = peripheral.find("drive")
-if not drive then
-    print("Error: No disk drive found.")
-    return
+local bridge = nil -- Deprecated: Replaced by Bank Chest
+local monitors = { peripheral.find("monitor") }
+
+-- Find all connected inventories
+local function findAllInventories()
+    local invs = {}
+    for _, name in ipairs(peripheral.getNames()) do
+        -- Wrap the peripheral
+        local p = peripheral.wrap(name)
+        
+        -- Check if it's an inventory (has .list and .size)
+        -- Also explicitly exclude things we know aren't "storage" chests for our purpose
+        -- (like disk drives which technically have inventory space sometimes, or strict exclusions)
+        local type = peripheral.getType(p)
+        
+        -- Exclude common non-chest peripherals
+        if type ~= "drive" and type ~= "monitor" and type ~= "speaker" and type ~= "modem" and type ~= "computer" then
+            -- Verify it has inventory methods
+            if p.list and p.size and p.pushItems and p.pullItems then
+                table.insert(invs, p)
+            end
+        end
+    end
+    return invs
+end
+
+local allInventories = findAllInventories()
+
+local mon = nil
+if #monitors > 0 then
+    mon = monitors[1]
+    mon.setTextScale(1)
+    if mon.isColor() then
+        term.redirect(mon)
+    end
+end
+
+local w, h = term.getSize()
+
+-- === STATE MANAGEMENT ===
+local lastActivity = os.clock()
+local chestConfig = nil -- Will hold { customer = "name", bank = "name" }
+
+local function resetActivity()
+    lastActivity = os.clock()
 end
 
 local function clear()
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
     term.clear()
     term.setCursorPos(1, 1)
 end
 
-local function drawHeader()
-    term.setBackgroundColor(colors.green)
-    term.setTextColor(colors.white)
-    term.setCursorPos(1, 1)
+local function centerText(y, text, color)
+    term.setCursorPos(1, y)
     term.clearLine()
-    term.setCursorPos(2, 1)
-    term.write("ARCADE CASHIER")
+    local x = math.floor((w - #text) / 2) + 1
+    term.setCursorPos(x, y)
+    if color then term.setTextColor(color) end
+    term.write(text)
 end
 
-local function main()
+-- === CONFIGURATION WIZARD ===
+local function configureChests()
+    -- Try to load existing config
+    if fs.exists(".chest_config") then
+        local f = fs.open(".chest_config", "r")
+        local data = f.readAll()
+        f.close()
+        local success, cfg = pcall(textutils.unserialize, data)
+        if success and cfg and cfg.customer and cfg.bank then
+            -- Verify they still exist
+            if peripheral.isPresent(cfg.customer) and peripheral.isPresent(cfg.bank) then
+                chestConfig = cfg
+                return
+            end
+        end
+    end
+
+    -- Start Wizard
+    while true do
+        allInventories = findAllInventories()
+        
+        if #allInventories < 2 then
+            clear()
+            centerText(h/2-1, "SETUP ERROR", colors.red)
+            centerText(h/2+1, "Need 2 Chests Connected", colors.white)
+            centerText(h/2+2, "Found: " .. #allInventories, colors.gray)
+            sleep(2)
+        else
+            clear()
+            centerText(2, "PAYMENT SETUP", colors.cyan)
+            centerText(4, "Found " .. #allInventories .. " Chests/Barrels", colors.white)
+            
+            centerText(7, "Step 1: EMPTY All Chests", colors.yellow)
+            centerText(9, "Step 2: Put 1 DIAMOND in", colors.yellow)
+            centerText(10, "the CUSTOMER (Input) Chest", colors.yellow) 
+            
+            centerText(h-2, "Scanning...", colors.gray)
+            
+            -- Scan loop
+            local customerChestName = nil
+            local bankChestName = nil
+            
+            for _, inv in ipairs(allInventories) do
+                local items = inv.list()
+                for slot, item in pairs(items) do
+                    if item.name == "minecraft:diamond" then
+                        customerChestName = peripheral.getName(inv)
+                        break
+                    end
+                end
+                if customerChestName then break end
+            end
+            
+            if customerChestName then
+                -- Automatically assign the first OTHER chest as Bank
+                for _, inv in ipairs(allInventories) do
+                    local name = peripheral.getName(inv)
+                    if name ~= customerChestName then
+                        bankChestName = name
+                        break
+                    end
+                end
+                
+                if bankChestName then
+                   clear()
+                   centerText(h/2, "CONFIG SUCCESS!", colors.lime)
+                   centerText(h/2+2, "Customer: " .. customerChestName, colors.gray)
+                   centerText(h/2+3, "Bank: " .. bankChestName, colors.gray)
+                   
+                   chestConfig = { customer = customerChestName, bank = bankChestName }
+                   
+                   local f = fs.open(".chest_config", "w")
+                   f.write(textutils.serialize(chestConfig))
+                   f.close()
+                   
+                   centerText(h-2, "Please Remove Diamond", colors.yellow)
+                   sleep(3)
+                   
+                   -- Wait for diamond removal
+                   while true do
+                        local hasItem = false
+                        local inv = peripheral.wrap(customerChestName)
+                        for k,v in pairs(inv.list()) do hasItem = true end
+                        if not hasItem then break end
+                        sleep(0.5)
+                   end
+                   return
+                end
+            end
+            sleep(1)
+        end
+    end
+end
+
+-- === ANIMATIONS ===
+
+local function animateCountUp(startVal, endVal, y, labelColor, valColor)
+    local steps = 10
+    local delay = 0.05
+    local diff = endVal - startVal
+    
+    if diff == 0 then return end
+    
+    for i = 1, steps do
+        local current = math.floor(startVal + (diff * (i/steps)))
+        centerText(y, "CREDITS: " .. current, valColor or colors.yellow)
+        sleep(delay)
+    end
+end
+
+local function animateScanning(y)
+    local frames = {
+        "ScAnNiNg...",
+        "sCaNnInG...",
+        "ScAnNiNg...",
+        "sCaNnInG..."
+    }
+    for _, f in ipairs(frames) do
+        centerText(y, f, colors.yellow)
+        sleep(0.1)
+    end
+end
+
+local function animateDispense(y)
+    centerText(y, "Dispensing...", colors.yellow)
+    audio.playCoinDispense()
+    for i=1,3 do
+        centerText(y, "Dispensing" .. string.rep(".", i), colors.yellow)
+        sleep(0.15)
+    end
+end
+
+-- === SCREENSAVER ===
+local function runScreensaver()
+    if not fs.exists(SCREENSAVER_DIR) or not fs.isDir(SCREENSAVER_DIR) then
+        return
+    end
+    
+    local files = fs.list(SCREENSAVER_DIR)
+    if #files == 0 then return end
+    
+    local randomFile = files[math.random(1, #files)]
+    local fullPath = fs.combine(SCREENSAVER_DIR, randomFile)
+    
+    local function screensaverRoutine()
+        shell.run(fullPath)
+    end
+    
+    local function inputWatcher()
+        local ev, p1 = os.pullEvent()
+        while true do
+            if ev == "key" or ev == "mouse_click" or ev == "monitor_touch" or ev == "disk" then
+                return true
+            end
+            ev, p1 = os.pullEvent()
+        end
+    end
+    
+    parallel.waitForAny(screensaverRoutine, inputWatcher)
+    
+    resetActivity()
+    clear()
+end
+
+-- === LOGIC ===
+
+local function scanIOChest()
+    if not chestConfig then return 0, {} end
+    local cust = peripheral.wrap(chestConfig.customer)
+    if not cust then return 0, {} end
+    
+    local total = 0
+    local items = {}
+    
+    for slot, item in pairs(cust.list()) do
+        local rate = RATES_INPUT[item.name]
+        if rate then
+            local val = rate * item.count
+            total = total + val
+            table.insert(items, {slot=slot, name=item.name, count=item.count, value=val})
+        else
+             -- Also track invalid items to move them to bank (garbage collection)
+             table.insert(items, {slot=slot, name=item.name, count=item.count, value=0, garbage=true})
+        end
+    end
+    return total, items
+end
+
+local function safeTransfer(fromObj, fromName, toObj, toName, fromSlot, count)
+    -- Attempt 1: Push from Source
+    local success1, res1 = pcall(function()
+        return fromObj.pushItems(toName, fromSlot, count)
+    end)
+    
+    if success1 and type(res1) == "number" and res1 >= count then return res1 end
+    
+    -- Attempt 2: Pull from Destination
+    local success2, res2 = pcall(function()
+        return toObj.pullItems(fromName, fromSlot, count)
+    end)
+    
+    if success2 and type(res2) == "number" then return res2 end
+    
+    -- Return error info
+    local err = "Transfer Failed."
+    if not success1 then err = err .. " Push: " .. tostring(res1) end
+    if not success2 then err = err .. " Pull: " .. tostring(res2) end
+    return 0, err
+end
+
+local function depositItems(items)
+    if not chestConfig then return false, "No Config" end
+    local cust = peripheral.wrap(chestConfig.customer)
+    local bank = peripheral.wrap(chestConfig.bank)
+    
+    if not cust or not bank then return false, "Chest Missing" end
+    
+    local totalCredits = 0
+    local lastError = nil
+    
+    for _, item in ipairs(items) do
+        -- Move item from Customer to Bank using safe transfer
+        local moved, err = safeTransfer(cust, chestConfig.customer, bank, chestConfig.bank, item.slot, item.count)
+        
+        if moved and moved > 0 and not item.garbage then
+             local rate = RATES_INPUT[item.name]
+             if rate then
+                totalCredits = totalCredits + (moved * rate)
+             end
+        elseif err then
+            lastError = err
+        end
+    end
+    
+    return true, totalCredits, lastError
+end
+
+local function withdrawItem(itemName, count)
+    if not chestConfig then return 0 end
+    local cust = peripheral.wrap(chestConfig.customer)
+    local bank = peripheral.wrap(chestConfig.bank)
+    if not cust or not bank then return 0 end
+    
+    -- Find item in Bank
+    local transferred = 0
+    for slot, item in pairs(bank.list()) do
+        if item.name == itemName then
+            local needed = count - transferred
+            
+            -- Bank -> Customer
+            local pushed = safeTransfer(bank, chestConfig.bank, cust, chestConfig.customer, slot, needed)
+            
+            transferred = transferred + pushed
+            if transferred >= count then break end
+        end
+    end
+    
+    return transferred
+end
+
+-- === MENUS ===
+
+local function menuDeposit(cardPath)
+    -- Initial scan
+    local val, items = scanIOChest()
+    
     while true do
         clear()
-        drawHeader()
+        centerText(2, "DEPOSIT ITEMS", colors.yellow)
+        centerText(4, "Place items in chest", colors.white)
+        centerText(5, "Diamonds (1), Obsidian (4)", colors.gray)
+        centerText(6, "Eyes of Ender (16)", colors.gray)
         
-        term.setBackgroundColor(colors.black)
-        term.setTextColor(colors.white)
+        -- Sum only valid values for display
+        local displayVal = 0
+        for _, it in ipairs(items) do if not it.garbage then displayVal = displayVal + it.value end end
         
-        term.setCursorPos(2, 3)
-        print("Insert a floppy disk to issue/edit card...")
-        
-        while not drive.isDiskPresent() do
-            os.pullEvent("disk")
+        if displayVal > 0 then
+            centerText(8, "Detected: " .. displayVal .. " Credits", colors.lime)
+        else
+            centerText(8, "Scanning Chest...", colors.gray)
         end
         
-        sleep(0.5) -- Wait for mount
+        centerText(h-2, "[BTN 1] Confirm & Deposit", colors.lime)
+        centerText(h-1, "[BTN 3] Back", colors.red)
         
-        -- Check for lock
-        if fs.exists("disk/credits.json") then
-             local f = fs.open("disk/credits.json", "r")
-             local content = f.readAll()
-             f.close()
-             local data = textutils.unserializeJSON(content)
-             
-             if data and data.in_game then
-                 clear()
-                 drawHeader()
-                 term.setCursorPos(2, 5)
-                 term.setTextColor(colors.red)
-                 print("ERROR: Card Locked!")
-                 print("Player is currently in a game.")
-                 sleep(2)
-                 drive.ejectDisk()
-                 -- Continue loop
-                 goto continue
-             end
+        local timer = os.startTimer(0.5)
+        local event, p1 = os.pullEvent()
+        
+        if event == "timer" then
+             _, items = scanIOChest()
+        else
+            resetActivity()
+            local btn = input.getButton(event, p1)
+            
+            if btn == "LEFT" then -- Button 1
+                audio.playClick()
+                -- Filter items list to ensure we actually have something to move (even garbage)
+                if #items > 0 then
+                    animateScanning(h-4)
+                    local success, result, err = depositItems(items)
+                    
+                    if success then
+                        if type(result) == "number" and result > 0 then
+                             audio.playCashRegister()
+                             credits.add(result, cardPath)
+                             
+                             clear()
+                             centerText(h/2, "DEPOSIT SUCCESS", colors.lime)
+                             centerText(h/2+1, "+" .. result .. " CREDITS", colors.yellow)
+                             sleep(1.5)
+                             return
+                        elseif result == 0 then
+                            -- Only garbage moved or transfer failed
+                             clear()
+                             if err and (string.find(err, "Target") or string.find(err, "target")) then
+                                 centerText(h/2-2, "NETWORK ERROR", colors.red)
+                                 centerText(h/2, "Chests cannot see each other", colors.white)
+                                 centerText(h/2+1, "Connect WIRED MODEMS to BOTH", colors.yellow)
+                                 centerText(h/2+2, "Chests/Barrels", colors.yellow)
+                                 sleep(6)
+                             else
+                                 centerText(h/2, "Invalid Items Stored", colors.red)
+                                 if err then
+                                    centerText(h/2+2, string.sub(err, 1, 38), colors.gray) 
+                                 end
+                                 sleep(3.5)
+                             end
+                        else
+                             audio.playError()
+                             centerText(h-4, "Error: 0 Deposited", colors.red)
+                             sleep(1)
+                        end
+                    else
+                         audio.playError()
+                         centerText(h-4, "Error: " .. tostring(result), colors.red)
+                         sleep(2)
+                    end
+                    _, items = scanIOChest()
+                else
+                    audio.playError()
+                    centerText(h-4, "Chest Empty", colors.red)
+                    sleep(0.5)
+                end
+                
+            elseif btn == "RIGHT" then -- Button 3
+                audio.playClick()
+                return
+            end
         end
-        
-        -- Disk detected
+    end
+end
+
+local function menuWithdraw(cardPath)
+    local currentSelection = 1 
+    local options = {
+        { name = "Diamond", id="minecraft:diamond", cost = 1, rate = 1, label="1 Credit -> 1 Diamond" },
+        { name = "Ender Pearl", id="minecraft:ender_pearl", cost = 16, rate = 16, label="16 Credits -> 1 Pearl" }
+    }
+    
+    while true do
         clear()
-        drawHeader()
+        local currentCreds = credits.get(cardPath)
+        centerText(2, "CASH OUT", colors.yellow)
+        centerText(3, "Credits: " .. currentCreds, colors.white)
         
-        term.setCursorPos(2, 3)
-        print("Disk detected!")
+        for i, opt in ipairs(options) do
+            local y = 5 + (i * 3)
+            local prefix = (i == currentSelection) and "> " or "  "
+            local color = (i == currentSelection) and colors.lime or colors.gray
+            centerText(y, prefix .. opt.name, color)
+            centerText(y+1, "(" .. opt.label .. ")", colors.gray)
+        end
         
-        term.setCursorPos(2, 5)
-        write("Enter Name: ")
-        local name = read()
+        centerText(h-2, "[1] Select   [2] Confirm", colors.cyan)
+        centerText(h-1, "[3] Back", colors.red)
         
-        term.setCursorPos(2, 6)
-        write("Enter Credits: ")
-        local credits = tonumber(read()) or 100
+        local event, p1 = os.pullEvent()
+        resetActivity()
+        local btn = input.getButton(event, p1)
         
-        print("")
-        print("Writing to disk...")
+        if btn == "LEFT" then -- Cycle Selection
+            audio.playClick()
+            currentSelection = currentSelection + 1
+            if currentSelection > #options then currentSelection = 1 end
+            
+        elseif btn == "CENTER" then -- Confirm
+            audio.playConfirm()
+            local opt = options[currentSelection]
+            
+            if currentCreds >= opt.rate then
+                clear()
+                centerText(h/2-2, "Dispensing " .. opt.name, colors.white)
+                
+                local moved = withdrawItem(opt.id, 1)
+                
+                if moved and moved >= 1 then
+                    animateDispense(h/2)
+                    credits.remove(opt.rate, cardPath)
+                    
+                    clear()
+                    centerText(h/2, "Please Take Item", colors.lime)
+                    sleep(1)
+                else
+                    audio.playError()
+                    centerText(h/2+2, "Bank Empty!", colors.red)
+                    sleep(1.5)
+                end
+            else
+                audio.playError()
+                centerText(h-3, "Insufficient Credits!", colors.red)
+                sleep(1)
+            end
+            
+        elseif btn == "RIGHT" then -- Back
+            audio.playClick()
+            return
+        end
+    end
+end
+
+local function menuMain(cardPath)
+    local lastCredits = credits.get(cardPath)
+
+    while true do
+        if not drive or not drive.isDiskPresent() then return end 
         
-        local data = {
-            name = name,
-            credits = credits,
-            in_game = false
-        }
+        local name = credits.getName(cardPath) or "Player"
+        local bal = credits.get(cardPath)
         
-        local f = fs.open("disk/credits.json", "w")
-        f.write(textutils.serializeJSON(data))
+        clear()
+        centerText(2, "WELCOME, " .. string.upper(name), colors.cyan)
+        
+        -- Credits Display
+        centerText(4, "CREDITS: " .. bal, colors.yellow)
+        
+        centerText(7, "[1] DEPOSIT Items", colors.white)
+        centerText(9, "[2] CASH OUT", colors.white)
+        centerText(11, "[3] EJECT CARD", colors.red)
+        
+        -- Fun check for items waiting
+        local val, _ = scanIOChest()
+        if val > 0 then
+             centerText(h-1, "Items Detected! Use [1]", colors.lime)
+        end
+        
+        local event, p1 = os.pullEvent()
+        resetActivity()
+        local btn = input.getButton(event, p1)
+        
+        if btn == "LEFT" then -- Deposit
+            audio.playClick()
+            menuDeposit(cardPath)
+        elseif btn == "CENTER" then -- Cash Out
+            audio.playClick()
+            menuWithdraw(cardPath)
+        elseif btn == "RIGHT" then -- Eject
+            audio.playClick()
+            if drive then drive.ejectDisk() end
+            return
+        end
+    end
+end
+
+local function promptNewCard(cardPath)
+    -- If card has no data/corrupt, init it
+    if not credits.getName(cardPath) then
+        credits.set(0, cardPath) 
+    end
+    menuMain(cardPath)
+end
+
+
+
+local function checkHardware()
+    local errors = {}
+    
+    -- 1. Inventory Check
+    allInventories = findAllInventories()
+    if #allInventories < 2 then
+        table.insert(errors, "Need 2 Connected Chests")
+        table.insert(errors, "Found: " .. #allInventories)
+    end
+    
+    -- 2. Speaker Check
+    if not peripheral.find("speaker") then
+        table.insert(errors, "Missing Speaker")
+    end
+    
+    -- 3. Drive Check
+    if not drive then
+        table.insert(errors, "Missing Disk Drive")
+    end
+    
+    -- 4. Redstone Config Check
+    if not fs.exists(".button_config") then
+        table.insert(errors, "Config Missing! Run config.lua")
+    else
+        local f = fs.open(".button_config", "r")
+        local success, conf = pcall(function() return textutils.unserialize(f.readAll()) end)
         f.close()
         
-        drive.setDiskLabel(name .. "'s Card")
+        if not success or not conf or not conf.LEFT or not conf.CENTER or not conf.RIGHT then
+            table.insert(errors, "Invalid Button Config")
+        else
+            local rsCount = 0
+            if conf.LEFT.type == "redstone" then rsCount = rsCount + 1 end
+            if conf.CENTER.type == "redstone" then rsCount = rsCount + 1 end
+            if conf.RIGHT.type == "redstone" then rsCount = rsCount + 1 end
+            
+            if rsCount < 3 then
+                table.insert(errors, "Need 3 Redstone Buttons")
+            end
+        end
+    end
+    
+    if #errors > 0 then
+        -- Force display to available output using standard print for safety
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        term.setCursorPos(1, 1)
         
-        print("Success!")
-        print("Please take your card.")
-        drive.ejectDisk()
+        term.setTextColor(colors.red)
+        print("HARDWARE CHECK FAILED")
+        print("---------------------")
         
-        sleep(2)
+        term.setTextColor(colors.white)
+        for i, err in ipairs(errors) do
+            print("- " .. err)
+        end
         
-        ::continue::
+        print("")
+        term.setTextColor(colors.yellow)
+        print("Press any key to reboot...")
+        os.pullEvent("key")
+        os.reboot()
+    end
+    
+    -- Config Wizard if needed
+    configureChests()
+    
+    -- Success
+    clear()
+    centerText(h/2, "Hardware Verified", colors.lime)
+    sleep(0.5)
+end
+
+-- === MAIN LOOP ===
+
+local function main()
+    checkHardware()
+
+    while true do
+        if not drive then
+            clear()
+            centerText(h/2, "Error: No Drive Found", colors.red)
+            sleep(5)
+            drive = peripheral.find("drive")
+        else
+            if drive.isDiskPresent() then
+                resetActivity()
+                local mount = drive.getMountPath()
+                if mount then
+                    promptNewCard(mount)
+                else
+                     sleep(0.5)
+                end
+            else
+                -- IDLE STATE
+                clear()
+                centerText(h/2 - 1, "INSERT PLAYER CARD", colors.lime)
+                
+                -- Idle scan for customers putting things in input
+                local val, _ = scanIOChest()
+                if val > 0 then
+                    resetActivity() 
+                    centerText(h/2 + 1, "Items Detected!", colors.yellow)
+                    centerText(h/2 + 2, "Insert Card to Deposit", colors.white)
+                end
+                
+                if os.clock() - lastActivity > SCREENSAVER_TIMEOUT then
+                    runScreensaver()
+                end
+                
+                local timer = os.startTimer(1)
+                local event, p1 = os.pullEvent()
+                
+                if event == "disk" then
+                    resetActivity()
+                elseif event == "timer" then
+                    -- loop
+                else
+                    -- Input reset
+                    local btn = input.getButton(event, p1)
+                    if btn or event == "monitor_touch" or event == "mouse_click" or event == "char" or event == "key" then
+                        resetActivity()
+                    end
+                end
+            end
+        end
     end
 end
 
 main()
+
 
 ]])
 
@@ -1375,6 +1991,257 @@ function credits.unlock(mountPath)
 end
 
 return credits
+
+]])
+
+writeFile('exchange.lua', [[
+local credits = require("credits")
+local completion = require("cc.completion")
+
+-- Configuration
+local PRICES = {
+    ["minecraft:diamond"] = 1,
+    ["minecraft:obsidian"] = 4,
+    ["minecraft:ender_eye"] = 16
+}
+
+local mon = peripheral.find("monitor")
+local drive = peripheral.find("drive")
+local chest = nil
+local storage = nil
+
+-- Attempt to find chests/inventories
+local periphs = peripheral.getNames()
+for _, name in ipairs(periphs) do
+    if peripheral.getType(name) == "minecraft:chest" or peripheral.getType(name) == "minecraft:barrel" then
+        if not chest then
+            chest = peripheral.wrap(name)
+        elseif not storage then
+            storage = peripheral.wrap(name)
+        end
+    end
+end
+
+-- If only one chest found, assume we are a turtle or we void items? 
+-- The user said "sucked in". 
+-- If we are a command computer, maybe we can clearslot?
+-- For now, if no storage, we will just count and NOT move (safety) unless we are a turtle.
+local is_turtle = turtle ~= nil
+
+local function getDriveSide()
+    for _, name in ipairs(periphs) do
+        if peripheral.getType(name) == "drive" then
+            return name
+        end
+    end
+    return nil
+end
+
+local driveSide = getDriveSide()
+
+local interacting = false
+
+local function showAttract()
+    if not mon then return end
+    mon.setTextScale(1)
+    mon.setBackgroundColor(colors.black)
+    
+    local w, h = mon.getSize()
+    local colors_list = {colors.red, colors.orange, colors.yellow, colors.lime, colors.blue, colors.purple}
+    
+    local i = 1
+    while true do
+        if not interacting then
+            mon.setBackgroundColor(colors.black)
+            mon.clear()
+            mon.setCursorPos(1, h/2)
+            mon.setTextColor(colors_list[i])
+            mon.setTextScale(2)
+            local msg = "TURN IN COINS!"
+            -- Center roughly
+            mon.setCursorPos(3, 2) 
+            mon.write(msg)
+            
+            mon.setTextScale(1)
+            mon.setCursorPos(1, h-2)
+            mon.setTextColor(colors.white)
+            mon.write("No Disk? Check Chest!")
+            
+            i = i + 1
+            if i > #colors_list then i = 1 end
+            sleep(0.5)
+        else
+            sleep(0.5)
+        end
+    end
+end
+
+local function drawStatus(msg, color)
+    if not mon then return end
+    mon.setBackgroundColor(colors.black)
+    mon.clear()
+    mon.setCursorPos(1, 1)
+    mon.setTextColor(color or colors.white)
+    mon.setTextScale(1)
+    mon.write(msg)
+end
+
+local function launchFireworks()
+    -- Only works if command computer or configured
+    if commands then
+       -- Summon random firework
+       commands.exec("summon firework_rocket ~ ~2 ~ {LifeTime:15,FireworksItem:{id:firework_rocket,Count:1,tag:{Fireworks:{Flight:1,Explosions:[{Type:1,Flicker:1,Trail:1,Colors:[I;11743532],FadeColors:[I;11743532]}]}}}}")
+    else
+        -- Fallback sound or visualization could go here
+    end
+end
+
+local function processItems(mountPath)
+    if not chest then return end
+    
+    local total_credit_gain = 0
+    
+    -- Iterate all slots
+    for slot, item in pairs(chest.list()) do
+        if PRICES[item.name] then
+            local value = PRICES[item.name]
+            local count = item.count
+            local gain = value * count
+            
+            -- Move logic
+            local moved = false
+            if storage then
+                -- Push to storage
+                local pushed = chest.pushItems(peripheral.getName(storage), slot)
+                if pushed == count then moved = true end
+            elseif is_turtle then
+                -- Turtle suck (must be facing chest)
+                -- This is tricky if we don't know orientation. 
+                -- We'll assume standard computer behavior first.
+            else
+                 -- WE CANNOT DESTROY ITEMS SAFELY WITHOUT STORAGE
+                 -- but maybe the user wants us to?
+                 -- User said "sucked in". 
+                 -- Let's try to push to ANY other inventory found that is not the drive.
+                 for _, p in ipairs(peripheral.getNames()) do
+                    if p ~= peripheral.getName(chest) and p ~= peripheral.getName(drive) and peripheral.getType(p) ~= "monitor" and peripheral.getType(p) ~= "modem" then
+                        -- try push
+                        local pushed = chest.pushItems(p, slot)
+                        if pushed >= count then 
+                            moved = true 
+                            break 
+                        end
+                    end
+                 end
+            end
+            
+            if moved then
+                total_credit_gain = total_credit_gain + gain
+                -- print("Processed " .. item.name .. " x" .. count .. " = " .. gain)
+            else
+                -- Could not move items
+                if mon then
+                     local w, h = mon.getSize()
+                     mon.setCursorPos(1, h-1)
+                     mon.setTextColor(colors.red)
+                     mon.write("ERR: CANNOT MOVE ITEM")
+                     sleep(1)
+                     mon.setCursorPos(1, h-1)
+                     mon.clearLine()
+                end
+            end
+        end
+    end
+    
+    if total_credit_gain > 0 then
+        credits.add(total_credit_gain, mountPath)
+        return total_credit_gain
+    end
+    return 0
+end
+
+local function mainLoop()
+    local hadDisk = false
+    
+    while true do
+        local hasDisk = disk.isPresent(driveSide)
+        local mountPath = disk.getMountPath(driveSide)
+        
+        if hasDisk and mountPath then
+            interacting = true
+            if not hadDisk then
+                if mon then
+                    mon.setBackgroundColor(colors.black) -- Clear animation
+                    mon.clear()
+                end
+                hadDisk = true
+            end
+            
+            -- User logic
+            local current = credits.get(mountPath)
+            local name = credits.getName(mountPath) or "Guest"
+            
+            if mon then
+                mon.setCursorPos(1,1)
+                mon.setTextColor(colors.lime)
+                mon.write("Welcome, " .. name)
+                mon.setCursorPos(1,2)
+                mon.write("Credits: " .. current)
+                mon.setCursorPos(1,4)
+                mon.setTextColor(colors.white)
+                mon.write("Place items in chest...")
+            end
+            
+            local gained = processItems(mountPath)
+            if gained > 0 then
+                if mon then
+                    mon.setCursorPos(1,6)
+                    mon.setTextColor(colors.yellow)
+                    mon.write("Added: " .. gained .. " credits!")
+                    sleep(1)
+                    mon.setCursorPos(1,6) 
+                    mon.clearLine()
+                end
+            end
+            
+        else
+            -- No disk
+            interacting = false
+            if hadDisk then hadDisk = false end
+            
+            -- Check if someone is interacting (e.g. items in chest but no disk)
+            local chestHasItems = false
+            if chest then
+                local list = chest.list()
+                if list then
+                    for slot, item in pairs(list) do
+                        if PRICES[item.name] then
+                            chestHasItems = true
+                            break
+                        end
+                    end
+                end
+            end
+
+            if chestHasItems then
+                -- "Throws fireworks and encourages them"
+                launchFireworks()
+                -- We rely on parallel animation to show "TURN IN COINS" / "INSERT DISK"
+                sleep(2) -- Don't spam fireworks
+            end
+        end
+        
+        sleep(0.5)
+    end
+end
+
+-- Run
+if not mon then
+    print("Error: No monitor found.")
+    return
+end
+
+parallel.waitForAny(showAttract, mainLoop)
 
 ]])
 
@@ -1874,7 +2741,9 @@ local games = {
     { name = "Blackjack", cmd = "blackjack" },
     { name = "Super Slots", cmd = "slots" },
     { name = "Can't Stop", cmd = "cant_stop" },
-    { name = "RPS Rogue", cmd = "rps_rogue" }
+    { name = "RPS Rogue", cmd = "rps_rogue" },
+    { name = "Exchange", cmd = "exchange" },
+    { name = "Cashier System", cmd = "cashier" }
 }
 
 local selected = 1

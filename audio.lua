@@ -66,4 +66,29 @@ function audio.playChip()
     play("hat", 1, 12)
 end
 
+function audio.playCashRegister()
+    -- Cha-ching!
+    if not speaker then return end
+    play("bell", 2, 12)
+    sleep(0.1)
+    play("bell", 2, 16)
+end
+
+function audio.playCoinDispense()
+    -- Clinking coins
+    if not speaker then return end
+    for i = 1, 3 do
+        play("bit", 1, 20 + math.random(-2, 2))
+        sleep(0.05)
+    end
+end
+
+function audio.playError()
+    -- Error buzzer
+    if not speaker then return end
+    play("bass", 2, 6)
+    sleep(0.1)
+    play("bass", 2, 6)
+end
+
 return audio
