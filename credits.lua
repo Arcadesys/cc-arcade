@@ -1,69 +1,132 @@
-local CREDITS_FILE = "disk/credits"
-local DEFAULT_CREDITS = 0 -- Default to 0 if no disk/file
+local DEFAULT_CREDITS = 0 
+local DEFAULT_NAME = "Guest"
 
 local credits = {}
 
-function credits.get()
-    if _G.ARCADE_DEV_MODE then
-        return math.huge
-    end
+local function getFilePath(mountPath)
+    return (mountPath or "disk") .. "/credits.json"
+end
 
-    if not fs.exists(CREDITS_FILE) then
-        return DEFAULT_CREDITS
+local function readData(mountPath)
+    local path = getFilePath(mountPath)
+    if not fs.exists(path) then
+        return nil
     end
     
-    local f = fs.open(CREDITS_FILE, "r")
-    if not f then return DEFAULT_CREDITS end
+    local f = fs.open(path, "r")
+    if not f then return nil end
     local content = f.readAll()
     f.close()
     
-    local amount = tonumber(content)
-    
-    if not amount then
-        return DEFAULT_CREDITS
-    end
-    
-    return amount
+    local data = textutils.unserializeJSON(content)
+    return data
 end
 
-function credits.set(amount)
-    if _G.ARCADE_DEV_MODE then
-        return true -- No-op in dev mode
-    end
-
+local function writeData(mountPath, data)
+    local path = getFilePath(mountPath)
     -- Only write if the directory exists (disk is present)
-    local dir = fs.getDir(CREDITS_FILE)
+    local dir = fs.getDir(path)
     if not fs.exists(dir) then
         return false 
     end
 
-    local f = fs.open(CREDITS_FILE, "w")
+    local f = fs.open(path, "w")
     if f then
-        f.write(tostring(math.floor(amount)))
+        f.write(textutils.serializeJSON(data))
         f.close()
         return true
     end
     return false
 end
 
-function credits.add(amount)
-    local current = credits.get()
+-- Find all connected disks with credits info
+function credits.findCards()
+    local cards = {}
+    for _, side in ipairs(peripheral.getNames()) do
+        if peripheral.getType(side) == "drive" then
+            local path = disk.getMountPath(side)
+            if path then
+                local data = readData(path)
+                if data then
+                    table.insert(cards, {
+                        path = path, 
+                        side = side,
+                        name = data.name or DEFAULT_NAME,
+                        credits = data.credits or DEFAULT_CREDITS
+                    })
+                end
+            end
+        end
+    end
+    return cards
+end
+
+function credits.get(mountPath)
+    if _G.ARCADE_DEV_MODE then
+        return math.huge
+    end
+
+    local data = readData(mountPath)
+    if not data or not data.credits then
+        return DEFAULT_CREDITS
+    end
+    
+    return tonumber(data.credits) or DEFAULT_CREDITS
+end
+
+function credits.getName(mountPath)
+    local data = readData(mountPath)
+    if not data or not data.name then
+        return nil
+    end
+    return data.name
+end
+
+function credits.set(amount, mountPath)
+    if _G.ARCADE_DEV_MODE then
+        return true 
+    end
+
+    local data = readData(mountPath) or { name = DEFAULT_NAME }
+    data.credits = math.floor(amount)
+    
+    return writeData(mountPath, data)
+end
+
+function credits.add(amount, mountPath)
+    local current = credits.get(mountPath)
     local newAmount = current + amount
-    credits.set(newAmount)
+    credits.set(newAmount, mountPath)
     return newAmount
 end
 
-function credits.remove(amount)
+function credits.remove(amount, mountPath)
     if _G.ARCADE_DEV_MODE then
-        return true -- Always successful in dev mode
+        return true 
     end
 
-    local current = credits.get()
+    local current = credits.get(mountPath)
     if current >= amount then
-        credits.set(current - amount)
+        credits.set(current - amount, mountPath)
         return true
     else
         return false
+    end
+end
+
+function credits.lock(mountPath)
+    local data = readData(mountPath)
+    if data then
+        data.in_game = true
+        writeData(mountPath, data)
+    end
+end
+
+function credits.unlock(mountPath)
+    local data = readData(mountPath)
+    if data then
+        data.in_game = false
+        writeData(mountPath, data)
     end
 end
 

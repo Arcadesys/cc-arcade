@@ -20,29 +20,15 @@ local C_MSG = colors.cyan
 local CARD_W = 4
 local CARD_H = 3
 
--- 3-Button Config
-local KEYS = {
-    LEFT = { keys.left, keys.a, keys.q },
-    CENTER = { keys.up, keys.w, keys.space, keys.enter },
-    RIGHT = { keys.right, keys.d, keys.e }
-}
-
-local function isKey(key, set)
-    for _, k in ipairs(set) do if key == k then return true end end
-    return false
-end
+local input = require("input")
 
 local function waitKey()
     while true do
         local e, p1 = os.pullEvent()
-        if e == "key" then
-            if isKey(p1, KEYS.LEFT) then return "LEFT" end
-            if isKey(p1, KEYS.CENTER) then return "CENTER" end
-            if isKey(p1, KEYS.RIGHT) then return "RIGHT" end
-        elseif e == "redstone" then
-            if redstone.getInput("left") then sleep(0.2) return "LEFT" end
-            if redstone.getInput("top") or redstone.getInput("front") then sleep(0.2) return "CENTER" end
-            if redstone.getInput("right") then sleep(0.2) return "RIGHT" end
+        local button = input.getButton(e, p1)
+        if button then
+            if e == "redstone" then sleep(0.2) end
+            return button
         end
     end
 end
@@ -314,48 +300,100 @@ end
 local function main()
     term.setBackgroundColor(colors.black)
     term.clear()
-    drawCenter(h/2 - 2, "BLACKJACK", colors.lime, colors.black)
-    drawCenter(h/2, "Select Players: 1-3", colors.white, colors.black)
-    drawCenter(h/2 + 2, "[L] -   [C] Start   [R] +", colors.gray, colors.black)
     
-    local numPlayers = 1
-    -- Removed player selection loop
-
+    local creditsAPI = require("credits")
+    local audio = require("audio")
     
-    local deck = createDeck()
-    
-local creditsAPI = require("credits")
-
     while true do
-        -- Check Credits
-        if creditsAPI.get() < 10 then
-            term.setBackgroundColor(colors.black)
-            term.clear()
-            drawCenter(h/2, "Not enough credits!", colors.red, colors.black)
-            drawCenter(h/2+1, "Need 10 credits.", colors.white, colors.black)
-            sleep(2)
-            break
+        drawCenter(h/2 - 2, "BLACKJACK", colors.lime, colors.black)
+        drawCenter(h/2, "Insert Cards (Max 3)", colors.white, colors.black)
+        drawCenter(h/2 + 2, "[C] Start Game   [R] Exit", colors.gray, colors.black)
+        
+        -- Lobby Loop
+        local detectedCards = {}
+        while true do
+            local event, p1 = os.pullEvent()
+            if event == "key" then
+                local key = keys.getName(p1)
+                if key == "enter" or key == "space" then -- Start
+                    if #detectedCards > 0 then break end
+                    drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
+                    sleep(1)
+                    term.setCursorPos(1, h/2+4) term.clearLine()
+                elseif key == "backspace" or key == "e" then -- Exit
+                     term.setBackgroundColor(colors.black)
+                     term.clear()
+                     if fs.exists("menu.lua") then shell.run("menu.lua") end
+                     return
+                end
+            elseif event == "disk" or event == "disk_eject" then
+                -- Refresh cards
+                detectedCards = creditsAPI.findCards()
+                term.setCursorPos(1, h/2 + 4)
+                term.clearLine()
+                local msg = "Players: "
+                for i, c in ipairs(detectedCards) do
+                    msg = msg .. c.name .. " "
+                end
+                drawCenter(h/2 + 4, msg, colors.yellow, colors.black)
+            end
+            
+            -- Initial scan if just opened
+            if #detectedCards == 0 then
+                 detectedCards = creditsAPI.findCards()
+                 if #detectedCards > 0 then
+                    term.setCursorPos(1, h/2 + 4)
+                    term.clearLine()
+                    local msg = "Players: "
+                    for i, c in ipairs(detectedCards) do
+                        msg = msg .. c.name .. " "
+                    end
+                    drawCenter(h/2 + 4, msg, colors.yellow, colors.black)
+                end
+            end
         end
-
-        -- New Round
+        
+        -- Limit to 3 players
         local players = {}
-        for i=1, numPlayers do
-            table.insert(players, {hand={}, status="Playing", bet=10})
-            creditsAPI.remove(10) -- Deduct bet immediately
+        for i, card in ipairs(detectedCards) do
+            if i > 3 then break end
+            creditsAPI.lock(card.path)
+            table.insert(players, {
+                hand={}, 
+                status="Playing", 
+                bet=10, 
+                name=card.name, -- Use card name
+                mountPath=card.path 
+            })
+            if creditsAPI.get(card.path) < 10 then
+                drawCenter(h/2, card.name .. " needs 10 credits!", colors.red, colors.black)
+                creditsAPI.unlock(card.path)
+                sleep(2)
+                return -- Go back to lobby effectively (restarts main)
+            end
+            creditsAPI.remove(10, card.path) -- Deduct bet immediately
         end
+        
+        local deck = createDeck()
         local dealerHand = {}
         
         -- Initial Deal
         for _=1,2 do
-            for _, p in ipairs(players) do table.insert(p.hand, drawCardDeck(deck)) end
+            for _, p in ipairs(players) do 
+                table.insert(p.hand, drawCardDeck(deck)) 
+                audio.playDeal()
+                sleep(0.2)
+            end
             table.insert(dealerHand, drawCardDeck(deck))
+            audio.playDeal()
+            sleep(0.2)
         end
         
         -- Player Turns
         for i, p in ipairs(players) do
             while true do
                 local score = calculateHand(p.hand)
-                if score == 21 then
+                if score == 21 and #p.hand == 2 then
                     p.status = "Blackjack!"
                     break
                 elseif score > 21 then
@@ -363,12 +401,13 @@ local creditsAPI = require("credits")
                     break
                 end
                 
-                drawTable(players, dealerHand, i, "Player " .. i .. "'s Turn", false)
+                drawTable(players, dealerHand, i, p.name .. "'s Turn", false)
                 local action = waitKey()
                 
                 -- Normal Mode
                 if action == "LEFT" then -- Hit
                     table.insert(p.hand, drawCardDeck(deck))
+                    audio.playDeal()
                 elseif action == "CENTER" then -- Stand
                     p.status = "Stand"
                     break
@@ -378,10 +417,18 @@ local creditsAPI = require("credits")
                     local advAction = waitKey()
                     
                     if advAction == "LEFT" then -- Double Down
-                        table.insert(p.hand, drawCardDeck(deck))
-                        score = calculateHand(p.hand)
-                        if score > 21 then p.status = "Bust!" else p.status = "Dbl Stand" end
-                        break
+                        if creditsAPI.get(p.mountPath) >= p.bet then
+                            creditsAPI.remove(p.bet, p.mountPath)
+                            p.bet = p.bet * 2
+                            table.insert(p.hand, drawCardDeck(deck))
+                            audio.playDeal()
+                            score = calculateHand(p.hand)
+                            if score > 21 then p.status = "Bust!" else p.status = "Dbl Stand" end
+                            break
+                        else
+                             drawTable(players, dealerHand, i, "Not enough credits!", false)
+                             sleep(1)
+                        end
                     elseif advAction == "CENTER" then -- Surrender
                          p.status = "Surrender"
                          break
@@ -390,7 +437,7 @@ local creditsAPI = require("credits")
                     end
                 end
             end
-            drawTable(players, dealerHand, i, "Player " .. i .. " Done", false)
+            drawTable(players, dealerHand, i, p.name .. " Done", false)
             sleep(0.5)
         end
         
@@ -399,6 +446,7 @@ local creditsAPI = require("credits")
         sleep(1)
         while calculateHand(dealerHand) < 17 do
             table.insert(dealerHand, drawCardDeck(deck))
+            audio.playDeal()
             drawTable(players, dealerHand, 0, "Dealer Hits...", true)
             sleep(1)
         end
@@ -413,19 +461,25 @@ local creditsAPI = require("credits")
                 p.status = "LOSE"
             elseif p.status == "Surrender" then
                 p.status = "SURRENDER"
-                creditsAPI.add(math.floor(p.bet / 2))
+                creditsAPI.add(math.floor(p.bet / 2), p.mountPath)
+            elseif p.status == "Blackjack!" then
+                 p.status = "WIN!"
+                 creditsAPI.add(math.floor(p.bet * 2.5), p.mountPath) -- 3:2 payout usually, but let's do 2.5x return
             elseif dealerBust then
                 p.status = "WIN!"
-                creditsAPI.add(p.bet * 2)
+                creditsAPI.add(p.bet * 2, p.mountPath)
             elseif pScore > dealerScore then
                 p.status = "WIN!"
-                creditsAPI.add(p.bet * 2)
+                creditsAPI.add(p.bet * 2, p.mountPath)
             elseif pScore == dealerScore then
                 p.status = "PUSH"
-                creditsAPI.add(p.bet)
+                creditsAPI.add(p.bet, p.mountPath)
             else
                 p.status = "LOSE"
             end
+            
+            -- Unlock card
+            creditsAPI.unlock(p.mountPath)
         end
         
         drawTable(players, dealerHand, 0, "Round Over!", true)
@@ -440,18 +494,18 @@ local creditsAPI = require("credits")
                 local pCenterX = math.floor((i-1)*sectionW + sectionW/2)
                 
                 -- Animate Chips from Dealer to Player
+                audio.playChip()
                 animateChips(dealerX, dealerY, pCenterX, playerY)
+                audio.playWin()
                 
                 -- Animate Sparkles around Player
-                -- Area: pCenterX - 6 to pCenterX + 6, playerY - 2 to playerY + 4
                 animateSparkles(pCenterX - 6, playerY - 2, 12, 6)
                 
-                -- Redraw table to clean up
-                drawTable(players, dealerHand, 0, "Round Over!", true)
+                drawTable(players, dealerHand, 0, "Round Over!", true) -- Redraw to clear noise
             end
         end
         
-        drawTable(players, dealerHand, 0, "Round Over!", true)
+        drawTable(players, dealerHand, 0, "Round Over! [C] Play Again", true)
         
         local endAction = waitKey()
         if endAction == "RIGHT" then

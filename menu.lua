@@ -15,21 +15,9 @@ local games = {
 local selected = 1
 local w, h = term.getSize()
 
--- 3-Button Configuration
-local KEYS = {
-    LEFT = { keys.left, keys.a },
-    CENTER = { keys.up, keys.w, keys.space, keys.enter },
-    RIGHT = { keys.right, keys.d }
-}
-
-local function isKey(key, set)
-    for _, k in ipairs(set) do
-        if key == k then return true end
-    end
-    return false
-end
-
+local input = require("input")
 local credits = require("credits")
+local audio = require("audio")
 
 local function drawHeader()
     term.setBackgroundColor(colors.blue)
@@ -40,9 +28,15 @@ local function drawHeader()
     term.write("ARCADE OS")
     
     local c = credits.get()
-    local cStr = "Credits: " .. c
-    term.setCursorPos(w - #cStr - 1, 1)
-    term.write(cStr)
+    local name = credits.getName()
+
+    local rightText = "Credits: " .. c
+    if name then
+        rightText = name .. " | " .. rightText
+    end
+
+    term.setCursorPos(w - #rightText - 1, 1)
+    term.write(rightText)
 end
 
 local function drawMenu()
@@ -71,7 +65,7 @@ local function drawMenu()
     term.setTextColor(colors.black)
     term.setCursorPos(1, h)
     term.clearLine()
-    term.write(" [L] Prev  [C] Launch  [R] Next")
+    term.write(" [L] Prev  [C] Launch  [R] Next  [S] Monitor")
 end
 
 local function launchGame()
@@ -102,31 +96,61 @@ local function main()
         drawMenu()
         
         local event, p1 = os.pullEvent()
+        local button = input.getButton(event, p1)
         
-        if event == "key" then
-            if isKey(p1, KEYS.LEFT) then
-                selected = selected - 1
-                if selected < 1 then selected = #games end
-            elseif isKey(p1, KEYS.RIGHT) then
-                selected = selected + 1
-                if selected > #games then selected = 1 end
-            elseif isKey(p1, KEYS.CENTER) then
-                if launchGame() then break end
+        if button == "LEFT" then
+            selected = selected - 1
+            if selected < 1 then selected = #games end
+            audio.playClick()
+            if event == "redstone" then sleep(0.2) end
+        elseif button == "RIGHT" then
+            selected = selected + 1
+            if selected > #games then selected = 1 end
+            audio.playClick()
+            if event == "redstone" then sleep(0.2) end
+        elseif button == "CENTER" then
+            audio.playConfirm()
+            if launchGame() then break end
+            if event == "redstone" then sleep(0.2) end
+        elseif event == "char" and p1:lower() == "s" then
+            local m = peripheral.find("monitor")
+            if m then
+                audio.playConfirm()
+                term.setBackgroundColor(colors.black)
+                term.setTextColor(colors.white)
+                term.clear()
+                term.setCursorPos(1, 1)
+                print("Monitor detected.")
+                print("Rebooting to switch display...")
+                sleep(1)
+                os.reboot()
+            else
+                audio.playLose()
             end
-        elseif event == "redstone" then
-            -- Poll redstone inputs for physical buttons
-            if redstone.getInput("left") then
-                selected = selected - 1
-                if selected < 1 then selected = #games end
-                sleep(0.2) -- Debounce
-            elseif redstone.getInput("right") then
-                selected = selected + 1
-                if selected > #games then selected = 1 end
-                sleep(0.2)
-            elseif redstone.getInput("top") or redstone.getInput("front") then
-                if launchGame() then break end
-                sleep(0.2)
-            end
+        elseif event == "disk" then
+             local name = credits.getName()
+             local amount = credits.get()
+             if name then
+                audio.playConfirm()
+                local popupW, popupH = 24, 7
+                local px = math.floor((w - popupW) / 2)
+                local py = math.floor((h - popupH) / 2)
+                
+                -- Draw box
+                paintutils.drawFilledBox(px, py, px + popupW, py + popupH, colors.blue)
+                term.setTextColor(colors.yellow)
+                term.setCursorPos(px + 2, py + 1)
+                term.write("WELCOME BACK!")
+                
+                term.setTextColor(colors.white)
+                term.setCursorPos(px + 2, py + 3)
+                term.write(name)
+                
+                term.setCursorPos(px + 2, py + 5)
+                term.write("Credits: " .. amount)
+                
+                sleep(3)
+             end
         end
     end
 end

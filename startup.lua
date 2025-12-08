@@ -1,9 +1,31 @@
 -- startup.lua
 -- Launches the Arcade Menu OS
 
+-- Monitor Detection
+local monitor = peripheral.find("monitor")
+if monitor then
+    term.redirect(monitor)
+    
+    -- Dynamic Scaling: Find largest text scale that fits the UI
+    local min_w, min_h = 39, 19 -- Minimum resolution for Arcade apps
+    
+    for scale = 5, 0.5, -0.5 do
+        monitor.setTextScale(scale)
+        local w, h = monitor.getSize()
+        if w >= min_w and h >= min_h then
+            break
+        end
+    end
+end
+
 term.clear()
 term.setCursorPos(1, 1)
 print("Booting ArcadeOS...")
+
+if not fs.exists(".button_config") then
+    shell.run("config.lua")
+end
+
 print("Press 'D' for Dev Mode (2s)...")
 
 _G.ARCADE_DEV_MODE = false

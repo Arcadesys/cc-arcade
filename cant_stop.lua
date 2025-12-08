@@ -4,28 +4,15 @@
 local w, h = term.getSize()
 
 -- 3-Button Config
-local KEYS = {
-    LEFT = { keys.left, keys.a },
-    CENTER = { keys.up, keys.w, keys.space, keys.enter },
-    RIGHT = { keys.right, keys.d }
-}
-
-local function isKey(key, set)
-    for _, k in ipairs(set) do if key == k then return true end end
-    return false
-end
+local input = require("input")
 
 local function waitKey()
     while true do
         local e, p1 = os.pullEvent()
-        if e == "key" then
-            if isKey(p1, KEYS.LEFT) then return "LEFT" end
-            if isKey(p1, KEYS.CENTER) then return "CENTER" end
-            if isKey(p1, KEYS.RIGHT) then return "RIGHT" end
-        elseif e == "redstone" then
-            if redstone.getInput("left") then sleep(0.2) return "LEFT" end
-            if redstone.getInput("top") or redstone.getInput("front") then sleep(0.2) return "CENTER" end
-            if redstone.getInput("right") then sleep(0.2) return "RIGHT" end
+        local button = input.getButton(e, p1)
+        if button then
+            if e == "redstone" then sleep(0.2) end
+            return button
         end
     end
 end
@@ -200,6 +187,7 @@ end
 --------------------------------------------------------------------------------
 
 local creditsAPI = require("credits")
+local audio = require("audio")
 
 local function main()
     if creditsAPI.get() < 5 then
@@ -315,6 +303,7 @@ local function main()
         
         while not turnOver do
             -- Roll Dice
+            audio.playShuffle()
             local dice = rollDice()
             local options = getPairings(dice)
             
@@ -345,6 +334,7 @@ local function main()
                 term.setCursorPos(1, h-2)
                 term.setTextColor(colors.red)
                 term.write("BUST! No valid moves.")
+                audio.playLose()
                 sleep(2)
                 turnOver = true
             else
@@ -403,6 +393,7 @@ local function main()
                 
                 advance(chosen[1])
                 advance(chosen[2])
+                audio.playChip()
                 
                 -- Action Phase (Roll or Stop)
                 local actionChosen = false
@@ -421,10 +412,12 @@ local function main()
                             -- Check Column Win
                             if step >= COL_LENGTHS[col] then
                                 board[col].owner = currentPlayer
+                                audio.playWin()
                             end
                         end
                         turnOver = true
                         actionChosen = true
+                        audio.playConfirm()
                     elseif key == "RIGHT" then
                         -- View Board (Toggle) - Actually just redraws since loop continues
                     end
@@ -439,6 +432,7 @@ local function main()
             term.clear()
             term.setCursorPos(1, h/2)
             term.write("PLAYER " .. currentPlayer .. " WINS!")
+            audio.playWin()
             sleep(3)
             break
         end

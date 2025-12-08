@@ -6,25 +6,15 @@ local games = {
     { name = "Blackjack", cmd = "blackjack" },
     { name = "Super Slots", cmd = "slots" },
     { name = "Can't Stop", cmd = "cant_stop" },
-    { name = "RPS Rogue", cmd = "rps_rogue" }
+    { name = "RPS Rogue", cmd = "rps_rogue" },
+    { name = "Exchange", cmd = "exchange" }
 }
 
 local selected = 1
 local w, h = term.getSize()
 
--- 3-Button Configuration
-local KEYS = {
-    LEFT = { keys.left, keys.a },
-    CENTER = { keys.up, keys.w, keys.space, keys.enter },
-    RIGHT = { keys.right, keys.d }
-}
-
-local function isKey(key, set)
-    for _, k in ipairs(set) do
-        if key == k then return true end
-    end
-    return false
-end
+local input = require("input")
+local audio = require("audio")
 
 local function drawHeader()
     term.setBackgroundColor(colors.red)
@@ -90,31 +80,22 @@ local function main()
         drawMenu()
         
         local event, p1 = os.pullEvent()
+        local button = input.getButton(event, p1)
         
-        if event == "key" then
-            if isKey(p1, KEYS.LEFT) then
-                selected = selected - 1
-                if selected < 1 then selected = #games end
-            elseif isKey(p1, KEYS.RIGHT) then
-                selected = selected + 1
-                if selected > #games then selected = 1 end
-            elseif isKey(p1, KEYS.CENTER) then
-                installGame()
-                break
-            end
-        elseif event == "redstone" then
-            if redstone.getInput("left") then
-                selected = selected - 1
-                if selected < 1 then selected = #games end
-                sleep(0.2)
-            elseif redstone.getInput("right") then
-                selected = selected + 1
-                if selected > #games then selected = 1 end
-                sleep(0.2)
-            elseif redstone.getInput("top") or redstone.getInput("front") then
-                installGame()
-                break
-            end
+        if button == "LEFT" then
+            selected = selected - 1
+            if selected < 1 then selected = #games end
+            audio.playClick()
+            if event == "redstone" then sleep(0.2) end
+        elseif button == "RIGHT" then
+            selected = selected + 1
+            if selected > #games then selected = 1 end
+            audio.playClick()
+            if event == "redstone" then sleep(0.2) end
+        elseif button == "CENTER" then
+            audio.playConfirm()
+            installGame()
+            break
         end
     end
 end
