@@ -88,22 +88,22 @@ end
 
 -- === CONFIGURATION WIZARD ===
 local function configureChests()
-    -- Try to load existing config
-    if fs.exists(".chest_config") then
-        local f = fs.open(".chest_config", "r")
-        local data = f.readAll()
+    -- Priority 1: Check for explicit "bank" and "drawer" named peripherals
+    local hasBank = peripheral.isPresent("bank")
+    local hasDrawer = peripheral.isPresent("drawer")
+
+    if hasBank and hasDrawer then
+        -- Verify they are inventories (optional but good practice)
+        chestConfig = { bank = "bank", customer = "drawer" }
+        
+        -- Save config
+        local f = fs.open(".chest_config", "w")
+        f.write(textutils.serialize(chestConfig))
         f.close()
-        local success, cfg = pcall(textutils.unserialize, data)
-        if success and cfg and cfg.customer and cfg.bank then
-            -- Verify they still exist
-            if peripheral.isPresent(cfg.customer) and peripheral.isPresent(cfg.bank) then
-                chestConfig = cfg
-                return
-            end
-        end
+        return
     end
 
-    -- Start Wizard
+    -- Priority 2: Wizard (Mandatory if not named bank/drawer)
     while true do
         allInventories = findAllInventories()
         
@@ -115,12 +115,14 @@ local function configureChests()
             sleep(2)
         else
             clear()
-            centerText(2, "PAYMENT SETUP", colors.cyan)
-            centerText(4, "Found " .. #allInventories .. " Chests/Barrels", colors.white)
+            centerText(2, "PAYMENT CONFIG", colors.cyan)
+            
+            centerText(4, "Hardware Names:", colors.gray)
+            centerText(5, "'bank' & 'drawer' not found.", colors.red)
             
             centerText(7, "Step 1: EMPTY All Chests", colors.yellow)
             centerText(9, "Step 2: Put 1 DIAMOND in", colors.yellow)
-            centerText(10, "the CUSTOMER (Input) Chest", colors.yellow) 
+            centerText(10, "the DRAWER (Input) Chest", colors.yellow) 
             
             centerText(h-2, "Scanning...", colors.gray)
             
@@ -152,7 +154,7 @@ local function configureChests()
                 if bankChestName then
                    clear()
                    centerText(h/2, "CONFIG SUCCESS!", colors.lime)
-                   centerText(h/2+2, "Customer: " .. customerChestName, colors.gray)
+                   centerText(h/2+2, "Drawer: " .. customerChestName, colors.gray)
                    centerText(h/2+3, "Bank: " .. bankChestName, colors.gray)
                    
                    chestConfig = { customer = customerChestName, bank = bankChestName }
@@ -160,6 +162,11 @@ local function configureChests()
                    local f = fs.open(".chest_config", "w")
                    f.write(textutils.serialize(chestConfig))
                    f.close()
+                   
+                   -- Attempt to label the peripherals appropriately if possible
+                   -- (This fulfills the 'name them appropriately' request if supported)
+                   pcall(function() peripheral.call(customerChestName, "setLabel", "drawer") end)
+                   pcall(function() peripheral.call(bankChestName, "setLabel", "bank") end)
                    
                    centerText(h-2, "Please Remove Diamond", colors.yellow)
                    sleep(3)

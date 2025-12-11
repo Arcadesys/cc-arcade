@@ -91,4 +91,33 @@ function audio.playError()
     play("bass", 2, 6)
 end
 
+end
+
+function audio.playDFPWM(path, volume)
+    -- Plays a DFPWM file
+    if not speaker then return false end
+    if not fs.exists(path) then return false end
+
+    local dfpwm = require("cc.audio.dfpwm")
+    local decoder = dfpwm.make_decoder()
+    
+    local file = fs.open(path, "rb")
+    if not file then return false end
+
+    -- Read in chunks
+    while true do
+        local chunk = file.read(16 * 1024)
+        if not chunk then break end
+        
+        local buffer = decoder(chunk)
+        
+        while not speaker.playAudio(buffer, volume or 1.0) do
+            os.pullEvent("speaker_audio_empty")
+        end
+    end
+    
+    file.close()
+    return true
+end
+
 return audio

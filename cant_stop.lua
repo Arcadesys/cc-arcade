@@ -186,19 +186,8 @@ end
 -- MAIN LOOP
 --------------------------------------------------------------------------------
 
-local creditsAPI = require("credits")
-local audio = require("audio")
+    -- Credits removed for free play
 
-local function main()
-    if creditsAPI.get() < 5 then
-        term.clear()
-        term.setCursorPos(1, h/2)
-        term.setTextColor(colors.red)
-        term.write("Insert Coin: 5 Credits")
-        sleep(2)
-        return
-    end
-    creditsAPI.remove(5)
 
     -- Player Selection
     local numPlayers = 1

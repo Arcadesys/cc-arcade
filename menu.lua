@@ -8,6 +8,7 @@ local games = {
     { name = "Super Slots", cmd = "slots" },
     { name = "Can't Stop", cmd = "cant_stop" },
     { name = "RPS Rogue", cmd = "rps_rogue" },
+    { name = "Roulette Watch", cmd = "screensavers/roulette" },
     { name = "Exit", cmd = "exit" },
     { name = "Reboot", cmd = "reboot" },
     { name = "Shutdown", cmd = "shutdown" }
