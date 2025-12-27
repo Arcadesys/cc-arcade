@@ -32,6 +32,80 @@ local function drawCenter(y, text, fg, bg)
 end
 
 --------------------------------------------------------------------------------
+-- UI PRIMITIVES ("graphics" via term/blit)
+--------------------------------------------------------------------------------
+
+local HAS_BLIT = type(term.blit) == "function"
+
+local function clamp(n, lo, hi)
+    if n < lo then return lo end
+    if n > hi then return hi end
+    return n
+end
+
+local function toBlit(c)
+    if type(colors) == "table" and type(colors.toBlit) == "function" then
+        return colors.toBlit(c)
+    end
+    -- Fallback: most CC installs have colors.toBlit; if not, use white.
+    return "0"
+end
+
+local function blitFill(x, y, width, height, ch, fg, bg)
+    ch = ch or " "
+    fg = fg or colors.white
+    bg = bg or colors.black
+    if width <= 0 or height <= 0 then return end
+    if not HAS_BLIT then
+        term.setBackgroundColor(bg)
+        term.setTextColor(fg)
+        for row = 0, height - 1 do
+            term.setCursorPos(x, y + row)
+            term.write(string.rep(ch, width))
+        end
+        return
+    end
+    local text = string.rep(ch, width)
+    local fgs = string.rep(toBlit(fg), width)
+    local bgs = string.rep(toBlit(bg), width)
+    for row = 0, height - 1 do
+        term.setCursorPos(x, y + row)
+        term.blit(text, fgs, bgs)
+    end
+end
+
+local function writeAt(x, y, text, fg, bg)
+    if not text or #text == 0 then return end
+    term.setCursorPos(x, y)
+    if bg then term.setBackgroundColor(bg) end
+    if fg then term.setTextColor(fg) end
+    term.write(text)
+end
+
+local function frameRect(x, y, width, height, borderBg, innerBg)
+    if width <= 1 or height <= 1 then return end
+    borderBg = borderBg or colors.gray
+    innerBg = innerBg or colors.black
+
+    blitFill(x, y, width, 1, " ", colors.white, borderBg)
+    blitFill(x, y + height - 1, width, 1, " ", colors.white, borderBg)
+    blitFill(x, y + 1, 1, height - 2, " ", colors.white, borderBg)
+    blitFill(x + width - 1, y + 1, 1, height - 2, " ", colors.white, borderBg)
+    blitFill(x + 1, y + 1, width - 2, height - 2, " ", colors.white, innerBg)
+end
+
+local function shadowRect(x, y, width, height, shadowBg)
+    shadowBg = shadowBg or colors.black
+    blitFill(x + 1, y + height, width, 1, " ", colors.white, shadowBg)
+    blitFill(x + width, y + 1, 1, height, " ", colors.white, shadowBg)
+end
+
+local function centerTextIn(x, y, width, text, fg, bg)
+    local tx = x + math.floor((width - #text) / 2)
+    writeAt(tx, y, text, fg, bg)
+end
+
+--------------------------------------------------------------------------------
 -- GAME CONFIG
 --------------------------------------------------------------------------------
 
@@ -99,76 +173,125 @@ end
 local reelPos = {1, 1, 1}
 
 local function drawReel(idx, x, y)
-    -- Draw Frame around reel
-    term.setBackgroundColor(colors.gray)
-    for i=-1, 3 do
-        term.setCursorPos(x-1, y+i*3-1)
-        term.write("      ") -- Clear/Bg
-    end
-    
-    for i=0,2 do
+    -- Reel window: framed 7x7 with 3 visible symbols.
+    local reelW, reelH = 7, 7
+    shadowRect(x, y, reelW, reelH, colors.black)
+    frameRect(x, y, reelW, reelH, colors.gray, colors.white)
+
+    local innerX, innerY = x + 1, y + 1
+    local innerW, innerH = reelW - 2, reelH - 2
+
+    -- Subtle inner shading band
+    blitFill(innerX, innerY, innerW, 1, " ", colors.white, colors.lightGray)
+    blitFill(innerX, innerY + innerH - 1, innerW, 1, " ", colors.white, colors.lightGray)
+
+    local rowYs = { innerY + 1, innerY + 2, innerY + 3 }
+    for i = 0, 2 do
         local pos = (reelPos[idx] + i - 1) % #REELS[idx] + 1
         local sym = REELS[idx][pos]
-        term.setCursorPos(x, y + i*3)
-        term.setBackgroundColor(colors.white)
-        term.setTextColor(COLORS[sym])
-        term.write(" " .. CHARS[sym] .. CHARS[sym] .. " ")
-        term.setBackgroundColor(colors.black)
+        local yRow = rowYs[i + 1]
+
+        -- highlight the center row slightly
+        local bg = (i == 1) and colors.white or colors.lightGray
+        blitFill(innerX, yRow, innerW, 1, " ", colors.white, bg)
+
+        local face = " " .. CHARS[sym] .. CHARS[sym] .. CHARS[sym] .. " "
+        centerTextIn(innerX, yRow, innerW, face, COLORS[sym], bg)
     end
 end
 
 local function drawMachine(bet, message, currentPlayerName, currentCredits)
+    -- Small terminal fallback
+    if w < 34 or h < 19 then
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        drawCenter(1, " SUPER SLOTS ", colors.yellow, colors.blue)
+        drawCenter(3, "Bet: " .. tostring(bet), colors.white, colors.black)
+        drawCenter(5, tostring(message), colors.yellow, colors.black)
+        if currentPlayerName then
+            drawCenter(7, "Player: " .. currentPlayerName, colors.white, colors.black)
+            drawCenter(8, "Credits: " .. tostring(currentCredits), colors.gold, colors.black)
+        end
+        drawFooter("Bet", "Spin", "Exit")
+        return
+    end
+
+    -- Background (subtle pattern)
     term.setBackgroundColor(colors.black)
     term.clear()
-    
-    -- Title
-    term.setCursorPos(1, 1)
-    term.setBackgroundColor(colors.blue)
-    term.setTextColor(colors.yellow)
-    term.clearLine()
-    drawCenter(1, " SUPER SLOTS ", colors.yellow, colors.blue)
-    
-    -- Machine Box
-    local boxW, boxH = 26, 13
-    local bx, by = cx - 13, cy - 6
-    term.setBackgroundColor(colors.lightGray)
-    for i=0, boxH do
-        term.setCursorPos(bx, by+i)
-        term.write(string.rep(" ", boxW))
+    for y = 2, h - 5, 2 do
+        blitFill(1, y, w, 1, " ", colors.white, colors.black)
+        blitFill(1, y + 1, w, 1, " ", colors.white, colors.gray)
     end
-    
-    -- Draw Reels
-    local startX = cx - 8
-    local startY = cy - 4
-    for i=1,3 do
-        drawReel(i, startX + (i-1)*6, startY)
+
+    -- Top title bar
+    blitFill(1, 1, w, 1, " ", colors.white, colors.blue)
+    centerTextIn(1, 1, w, " SUPER SLOTS ", colors.yellow, colors.blue)
+    writeAt(2, 1, "*", colors.yellow, colors.blue)
+    writeAt(w - 1, 1, "*", colors.yellow, colors.blue)
+
+    -- Cabinet frame
+    local boxW, boxH = 30, 15
+    local bx, by = clamp(cx - math.floor(boxW / 2), 2, w - boxW - 1), clamp(cy - 7, 3, h - boxH - 5)
+    shadowRect(bx, by, boxW, boxH, colors.black)
+    frameRect(bx, by, boxW, boxH, colors.gray, colors.lightGray)
+    blitFill(bx + 1, by + 1, boxW - 2, 1, " ", colors.white, colors.orange)
+    centerTextIn(bx + 1, by + 1, boxW - 2, " JACKPOT ", colors.white, colors.orange)
+
+    -- Reels area
+    local startX = bx + 4
+    local startY = by + 4
+    for i = 1, 3 do
+        drawReel(i, startX + (i - 1) * 9, startY)
     end
-    
-    -- Payline Indicators
-    term.setBackgroundColor(colors.lightGray)
-    term.setTextColor(colors.red)
-    if bet >= 1 then term.setCursorPos(startX-2, startY+3) term.write(">") end -- Center
-    if bet >= 2 then term.setCursorPos(startX-2, startY+0) term.write(">") end -- Top
-    if bet >= 3 then term.setCursorPos(startX-2, startY+6) term.write(">") end -- Bottom
-    
-    -- Player Info
-    term.setBackgroundColor(colors.black)
-    term.setCursorPos(1, h-2)
-    term.setTextColor(colors.white)
+
+    -- Paylines (left arrows + line highlight across reel windows)
+    local payTopY = startY + 2
+    local payMidY = startY + 3
+    local payBotY = startY + 4
+    local arrowX = startX - 2
+    local lineX = startX + 1
+    local lineW = 3 * 9 - 4
+
+    if bet >= 2 then
+        writeAt(arrowX, payTopY, ">", colors.red, colors.lightGray)
+        blitFill(lineX, payTopY, lineW, 1, " ", colors.white, colors.red)
+    end
+    if bet >= 1 then
+        writeAt(arrowX, payMidY, ">", colors.red, colors.lightGray)
+        blitFill(lineX, payMidY, lineW, 1, " ", colors.white, colors.red)
+    end
+    if bet >= 3 then
+        writeAt(arrowX, payBotY, ">", colors.red, colors.lightGray)
+        blitFill(lineX, payBotY, lineW, 1, " ", colors.white, colors.red)
+    end
+
+    -- Side info panels
+    local infoY = by + boxH + 1
+    local infoH = 3
+    local leftW = math.min(18, w - 4)
+    local rightW = 12
+
+    frameRect(2, infoY, leftW, infoH, colors.gray, colors.black)
+    frameRect(w - rightW - 1, infoY, rightW, infoH, colors.gray, colors.black)
+
     if currentPlayerName then
-        term.write("Player: " .. currentPlayerName)
-        drawText(1, h-3, "Credits: " .. currentCredits, colors.gold, colors.black)
+        writeAt(4, infoY + 1, "Player:", colors.lightGray, colors.black)
+        writeAt(12, infoY + 1, tostring(currentPlayerName), colors.white, colors.black)
+        writeAt(4, infoY + 2, "Credits:", colors.lightGray, colors.black)
+        writeAt(13, infoY + 2, tostring(currentCredits), colors.gold, colors.black)
+    else
+        writeAt(4, infoY + 1, "Insert card to play", colors.lightGray, colors.black)
     end
-    
-    term.setCursorPos(w-10, h-2)
-    term.write("Bet: " .. bet)
-    
-    -- Message
-    term.setCursorPos(2, h-4)
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.yellow)
-    drawCenter(h-4, message, colors.yellow, colors.black)
-    
+
+    writeAt(w - rightW, infoY + 1, "BET", colors.lightGray, colors.black)
+    centerTextIn(w - rightW, infoY + 2, rightW - 1, tostring(bet), colors.white, colors.black)
+
+    -- Message banner
+    local msgY = h - 4
+    frameRect(2, msgY, w - 2, 2, colors.gray, colors.black)
+    centerTextIn(2, msgY + 1, w - 2, tostring(message or ""), colors.yellow, colors.black)
+
     -- Footer
     drawFooter("Bet", "Spin", "Exit")
 end
@@ -243,9 +366,31 @@ local function main()
     while true do
         term.setBackgroundColor(colors.black)
         term.clear()
-        drawCenter(h/2 - 2, "SUPER SLOTS", colors.gold, colors.black)
-        drawCenter(h/2, "Insert Cards (Max 3)", colors.white, colors.black)
-        drawCenter(h/2 + 2, "[C] Start Game   [R] Exit", colors.gray, colors.black)
+        if w >= 34 and h >= 19 then
+            -- Lobby art
+            blitFill(1, 1, w, 1, " ", colors.white, colors.blue)
+            centerTextIn(1, 1, w, " SUPER SLOTS ", colors.yellow, colors.blue)
+            local artX = clamp(cx - 16, 2, w - 32)
+            local artY = clamp(cy - 6, 2, h - 12)
+            shadowRect(artX, artY, 32, 10, colors.black)
+            frameRect(artX, artY, 32, 10, colors.gray, colors.lightGray)
+            blitFill(artX + 1, artY + 1, 30, 1, " ", colors.white, colors.orange)
+            centerTextIn(artX + 1, artY + 1, 30, " INSERT CARDS ", colors.white, colors.orange)
+
+            frameRect(artX + 4, artY + 3, 7, 5, colors.gray, colors.white)
+            frameRect(artX + 13, artY + 3, 7, 5, colors.gray, colors.white)
+            frameRect(artX + 22, artY + 3, 7, 5, colors.gray, colors.white)
+            centerTextIn(artX + 4, artY + 5, 7, "@@@", colors.red, colors.white)
+            centerTextIn(artX + 13, artY + 5, 7, "===", colors.lightGray, colors.white)
+            centerTextIn(artX + 22, artY + 5, 7, "777", colors.red, colors.white)
+
+            drawCenter(artY + 10, "Insert Cards (Max 3)", colors.white, colors.black)
+            drawCenter(artY + 12, "[Enter/Space] Start   [Backspace/E] Exit", colors.gray, colors.black)
+        else
+            drawCenter(h/2 - 2, "SUPER SLOTS", colors.gold, colors.black)
+            drawCenter(h/2, "Insert Cards (Max 3)", colors.white, colors.black)
+            drawCenter(h/2 + 2, "[Enter/Space] Start   [Backspace/E] Exit", colors.gray, colors.black)
+        end
         
         -- Lobby Loop
         local detectedCards = {}

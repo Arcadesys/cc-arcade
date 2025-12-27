@@ -6,6 +6,7 @@ local games = {
     { name = "Blackjack", cmd = "blackjack" },
     { name = "Baccarat", cmd = "baccarat" },
     { name = "Super Slots", cmd = "slots" },
+    { name = "Horse Race", cmd = "race" },
     { name = "Can't Stop", cmd = "cant_stop" },
     { name = "RPS Rogue", cmd = "rps_rogue" },
     { name = "Roulette Watch", cmd = "screensavers/roulette" },
