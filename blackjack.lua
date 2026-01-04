@@ -313,6 +313,21 @@ local function main()
         local detectedCards = {}
         while true do
             local event, p1 = os.pullEvent()
+
+            -- Arcade button controls (works for redstone + key-based configs)
+            local button = input.getButton(event, p1)
+            if button == "CENTER" then
+                if #detectedCards > 0 then break end
+                drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
+                sleep(1)
+                term.setCursorPos(1, h/2+4) term.clearLine()
+            elseif button == "RIGHT" then
+                term.setBackgroundColor(colors.black)
+                term.clear()
+                if fs.exists("menu.lua") then shell.run("menu.lua") end
+                return
+            end
+
             if event == "key" then
                 local key = keys.getName(p1)
                 if key == "enter" or key == "space" then -- Start

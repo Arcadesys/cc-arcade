@@ -2,12 +2,17 @@
 -- The lightweight Arcade OS Shell
 -- Controls: [Left] Prev, [Center] Launch, [Right] Next
 
+-- Kiosk machines should never expose the menu UI.
+if _G.ARCADE_KIOSK then
+    return
+end
+
 local games = {
     { name = "Blackjack", cmd = "blackjack" },
     { name = "Baccarat", cmd = "baccarat" },
     { name = "Super Slots", cmd = "slots" },
     { name = "Horse Race", cmd = "race" },
-    { name = "Can't Stop", cmd = "cant_stop" },
+    { name = "Can't Stop (Free)", cmd = "cant_stop" },
     { name = "RPS Rogue", cmd = "rps_rogue" },
     { name = "Roulette Watch", cmd = "screensavers/roulette" },
     { name = "Exit", cmd = "exit" },
@@ -85,6 +90,12 @@ local function launchGame()
         return true
     else
         if fs.exists(game.cmd .. ".lua") then
+            -- Persist selection so this game auto-loads at startup.
+            local f = fs.open(".arcade_config", "w")
+            if f then
+                f.write(game.cmd)
+                f.close()
+            end
             shell.run(game.cmd)
         else
             print("Game not installed: " .. game.cmd)

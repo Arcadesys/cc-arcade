@@ -91,8 +91,6 @@ function audio.playError()
     play("bass", 2, 6)
 end
 
-end
-
 function audio.playDFPWM(path, volume)
     -- Plays a DFPWM file
     if not speaker then return false end

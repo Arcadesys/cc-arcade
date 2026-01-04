@@ -385,17 +385,32 @@ local function main()
             centerTextIn(artX + 22, artY + 5, 7, "777", colors.red, colors.white)
 
             drawCenter(artY + 10, "Insert Cards (Max 3)", colors.white, colors.black)
-            drawCenter(artY + 12, "[Enter/Space] Start   [Backspace/E] Exit", colors.gray, colors.black)
+            drawCenter(artY + 12, "[C] Start   [R] Exit", colors.gray, colors.black)
         else
             drawCenter(h/2 - 2, "SUPER SLOTS", colors.gold, colors.black)
             drawCenter(h/2, "Insert Cards (Max 3)", colors.white, colors.black)
-            drawCenter(h/2 + 2, "[Enter/Space] Start   [Backspace/E] Exit", colors.gray, colors.black)
+            drawCenter(h/2 + 2, "[C] Start   [R] Exit", colors.gray, colors.black)
         end
         
         -- Lobby Loop
         local detectedCards = {}
         while true do
             local event, p1 = os.pullEvent()
+
+            -- Arcade button controls (works for redstone + key-based configs)
+            local button = input.getButton(event, p1)
+            if button == "CENTER" then
+                if #detectedCards > 0 then break end
+                drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
+                sleep(1)
+                term.setCursorPos(1, h/2+4) term.clearLine()
+            elseif button == "RIGHT" then
+                term.setBackgroundColor(colors.black)
+                term.clear()
+                if fs.exists("menu.lua") then shell.run("menu.lua") end
+                return
+            end
+
             if event == "key" then
                 local key = keys.getName(p1)
                 if key == "enter" or key == "space" then -- Start

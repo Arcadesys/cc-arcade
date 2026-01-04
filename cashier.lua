@@ -282,24 +282,40 @@ local function scanIOChest()
 end
 
 local function safeTransfer(fromObj, fromName, toObj, toName, fromSlot, count)
+    local moved = 0
+
     -- Attempt 1: Push from Source
-    local success1, res1 = pcall(function()
+    local pushOk, pushRes = pcall(function()
         return fromObj.pushItems(toName, fromSlot, count)
     end)
-    
-    if success1 and type(res1) == "number" and res1 >= count then return res1 end
-    
-    -- Attempt 2: Pull from Destination
-    local success2, res2 = pcall(function()
-        return toObj.pullItems(fromName, fromSlot, count)
+
+    if pushOk and type(pushRes) == "number" and pushRes > 0 then
+        moved = pushRes
+        if moved >= count then
+            return moved
+        end
+    end
+
+    -- Attempt 2: Pull remaining from Destination
+    local remaining = count - moved
+    local pullOk, pullRes = pcall(function()
+        return toObj.pullItems(fromName, fromSlot, remaining)
     end)
-    
-    if success2 and type(res2) == "number" then return res2 end
-    
-    -- Return error info
+
+    if pullOk and type(pullRes) == "number" and pullRes > 0 then
+        moved = moved + pullRes
+    end
+
+    if moved > 0 then
+        return moved
+    end
+
+    -- Return error info (includes successful 0-move results for debugging)
     local err = "Transfer Failed."
-    if not success1 then err = err .. " Push: " .. tostring(res1) end
-    if not success2 then err = err .. " Pull: " .. tostring(res2) end
+    err = err .. " Push: " .. tostring(pushRes)
+    err = err .. " Pull: " .. tostring(pullRes)
+    if not pushOk then err = err .. " (push error)" end
+    if not pullOk then err = err .. " (pull error)" end
     return 0, err
 end
 
@@ -338,19 +354,29 @@ local function withdrawItem(itemName, count)
     
     -- Find item in Bank
     local transferred = 0
+    local hasAny = false
+    local lastError = nil
     for slot, item in pairs(bank.list()) do
         if item.name == itemName then
+            hasAny = true
             local needed = count - transferred
             
             -- Bank -> Customer
-            local pushed = safeTransfer(bank, chestConfig.bank, cust, chestConfig.customer, slot, needed)
+            local pushed, err = safeTransfer(bank, chestConfig.bank, cust, chestConfig.customer, slot, needed)
+            if err then lastError = err end
             
             transferred = transferred + pushed
             if transferred >= count then break end
         end
     end
-    
-    return transferred
+
+    if transferred > 0 then
+        return transferred, "ok"
+    end
+    if not hasAny then
+        return 0, "out_of_stock"
+    end
+    return 0, "transfer_failed", lastError
 end
 
 -- === MENUS ===
@@ -487,7 +513,7 @@ local function menuWithdraw(cardPath)
                 clear()
                 centerText(h/2-2, "Dispensing " .. opt.name, colors.white)
                 
-                local moved = withdrawItem(opt.id, 1)
+                local moved, status, err = withdrawItem(opt.id, 1)
                 
                 if moved and moved >= 1 then
                     animateDispense(h/2)
@@ -498,8 +524,22 @@ local function menuWithdraw(cardPath)
                     sleep(1)
                 else
                     audio.playError()
-                    centerText(h/2+2, "Bank Empty!", colors.red)
-                    sleep(1.5)
+                    if status == "out_of_stock" then
+                        centerText(h/2+2, "Bank Empty!", colors.red)
+                        sleep(1.5)
+                    elseif err and (string.find(err, "Target") or string.find(err, "target")) then
+                        centerText(h/2-2, "NETWORK ERROR", colors.red)
+                        centerText(h/2, "Chests cannot see each other", colors.white)
+                        centerText(h/2+1, "Connect WIRED MODEMS to BOTH", colors.yellow)
+                        centerText(h/2+2, "Chests/Barrels", colors.yellow)
+                        sleep(6)
+                    else
+                        centerText(h/2-1, "TRANSFER ERROR", colors.red)
+                        if err then
+                            centerText(h/2+1, string.sub(tostring(err), 1, 38), colors.gray)
+                        end
+                        sleep(3)
+                    end
                 end
             else
                 audio.playError()

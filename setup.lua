@@ -7,7 +7,8 @@ local games = {
     { name = "Baccarat", cmd = "baccarat" },
     { name = "Super Slots", cmd = "slots" },
     { name = "Horse Race", cmd = "race" },
-    { name = "Can't Stop", cmd = "cant_stop" },
+    { name = "Can't Stop (Free)", cmd = "cant_stop" },
+    { name = "Can't Stop (Dedicated Spawn)", cmd = "cant_stop_kiosk" },
     { name = "RPS Rogue", cmd = "rps_rogue" },
     { name = "Roulette Watch", cmd = "screensavers/roulette" },
     { name = "Exchange", cmd = "exchange" },
@@ -68,10 +69,25 @@ local function installGame()
     term.clear()
     term.setCursorPos(1, 1)
     print("Installing " .. game.name .. "...")
-    
-    local file = fs.open(".arcade_config", "w")
-    file.write(game.cmd)
-    file.close()
+
+    -- Dedicated Spawn preset
+    if game.cmd == "cant_stop_kiosk" then
+        local file = fs.open(".arcade_config", "w")
+        file.write("cant_stop")
+        file.close()
+
+        local k = fs.open(".kiosk_mode", "w")
+        k.write("1")
+        k.close()
+
+        local kg = fs.open(".kiosk_game", "w")
+        kg.write("cant_stop")
+        kg.close()
+    else
+        local file = fs.open(".arcade_config", "w")
+        file.write(game.cmd)
+        file.close()
+    end
     
     print("Configuration saved.")
     print("Rebooting in 2 seconds...")

@@ -26,6 +26,44 @@ if not fs.exists(".button_config") then
     shell.run("config.lua")
 end
 
+-- Kiosk Mode: Dedicated public machine (e.g., spawn Can't Stop)
+local function readArcadeConfig()
+    if not fs.exists(".arcade_config") then return nil end
+    local f = fs.open(".arcade_config", "r")
+    if not f then return nil end
+    local cmd = (f.readAll() or "")
+    f.close()
+    cmd = cmd:gsub("%s+", "")
+    if cmd == "" then return nil end
+    return cmd
+end
+
+local function adminKeyPresent()
+    for _, side in ipairs(peripheral.getNames()) do
+        if peripheral.getType(side) == "drive" then
+            local path = disk.getMountPath(side)
+            if path and fs.exists(path .. "/admin.key") then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function shouldKiosk()
+    -- If explicitly enabled, always kiosk.
+    if fs.exists(".kiosk_mode") then return true end
+    -- Default: any configured machine is kiosk unless an admin key disk is inserted.
+    if fs.exists(".arcade_config") and not adminKeyPresent() then return true end
+    return false
+end
+
+if shouldKiosk() and fs.exists("kiosk.lua") then
+    _G.ARCADE_KIOSK = true
+    shell.run("kiosk.lua")
+    os.reboot()
+end
+
 print("Press 'D' for Dev Mode (2s)...")
 
 _G.ARCADE_DEV_MODE = false

@@ -34,6 +34,14 @@ local function isKey(key, set)
     return false
 end
 
+-- Track last-known redstone states so we can detect which button was pressed
+-- on the rising edge (helps when multiple inputs are momentarily high).
+local lastRedstone = {
+    LEFT = false,
+    CENTER = false,
+    RIGHT = false
+}
+
 local function getButton(event, p1)
     if event == "key" then
         -- Check configured keys
@@ -45,12 +53,41 @@ local function getButton(event, p1)
         if isKey(p1, DEFAULT_KEYS.LEFT) then return "LEFT" end
         if isKey(p1, DEFAULT_KEYS.CENTER) then return "CENTER" end
         if isKey(p1, DEFAULT_KEYS.RIGHT) then return "RIGHT" end
+
+    elseif event == "char" then
+        -- Numeric keyboard fallback matching on-screen prompts
+        local c = tostring(p1 or "")
+        if c == "1" then return "LEFT" end
+        if c == "2" then return "CENTER" end
+        if c == "3" then return "RIGHT" end
         
     elseif event == "redstone" then
-        -- Check configured redstone
-        if config.LEFT.type == "redstone" and redstone.getInput(config.LEFT.value) then return "LEFT" end
-        if config.CENTER.type == "redstone" and redstone.getInput(config.CENTER.value) then return "CENTER" end
-        if config.RIGHT.type == "redstone" and redstone.getInput(config.RIGHT.value) then return "RIGHT" end
+        -- Prefer configured redstone using rising-edge detection.
+        local states = {
+            LEFT = (config.LEFT.type == "redstone") and redstone.getInput(config.LEFT.value) or false,
+            CENTER = (config.CENTER.type == "redstone") and redstone.getInput(config.CENTER.value) or false,
+            RIGHT = (config.RIGHT.type == "redstone") and redstone.getInput(config.RIGHT.value) or false
+        }
+
+        local candidates = {}
+        for name, now in pairs(states) do
+            if now and not lastRedstone[name] then
+                table.insert(candidates, name)
+            end
+        end
+
+        -- Update memory before returning
+        lastRedstone.LEFT = states.LEFT
+        lastRedstone.CENTER = states.CENTER
+        lastRedstone.RIGHT = states.RIGHT
+
+        if #candidates == 1 then
+            return candidates[1]
+        end
+        if #candidates > 1 then
+            -- Ambiguous press (multiple lines rose at once). Ignore.
+            return nil
+        end
         
         -- Default redstone fallback (Legacy support)
         -- Only check if NOT configured as redstone to avoid double counting if config matches default
