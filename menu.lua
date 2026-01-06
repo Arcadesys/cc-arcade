@@ -9,6 +9,7 @@ local games = {
     { name = "Horse Race", cmd = "race", hasDemo = true },
     { name = "Can't Stop (Free)", cmd = "cant_stop", hasDemo = true },
     { name = "RPS Rogue", cmd = "rps_rogue", hasDemo = true },
+    { name = "Idlecraft (Free)", cmd = "idlecraft", hasDemo = true },
 }
 
 local utilityItems = {
