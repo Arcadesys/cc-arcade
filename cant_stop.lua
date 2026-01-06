@@ -335,6 +335,42 @@ end
 local function runOneGame()
     -- returns true if player requested EXIT
     local numPlayers = 1
+
+    local function runAttractModeNewGame()
+        while true do
+            refreshSize()
+            local w2, h2 = term.getSize()
+            local cx2, cy2 = math.floor(w2 / 2), math.floor(h2 / 2)
+
+            term.setBackgroundColor(colors.black)
+            term.clear()
+            drawTitleBar("CAN'T STOP", "DEMO")
+
+            frameRect(cx2 - 16, cy2 - 4, 33, 9, colors.gray, colors.black)
+            centerText(cx2 - 16, cy2 - 4, 33, " ATTRACTION MODE ", colors.yellow, colors.gray)
+            centerText(cx2 - 16, cy2 - 2, 33, "Rolling dice...", colors.white, colors.black)
+
+            local dice = rollDice()
+            local d = tostring(dice[1]) .. "  " .. tostring(dice[2]) .. "  " .. tostring(dice[3]) .. "  " .. tostring(dice[4])
+            centerText(cx2 - 16, cy2, 33, d, colors.lime, colors.black)
+
+            local opts = getPairings(dice)
+            local o1 = tostring(opts[1][1]) .. "+" .. tostring(opts[1][2])
+            local o2 = tostring(opts[2][1]) .. "+" .. tostring(opts[2][2])
+            local o3 = tostring(opts[3][1]) .. "+" .. tostring(opts[3][2])
+            centerText(cx2 - 16, cy2 + 2, 33, "Options: " .. o1 .. " | " .. o2 .. " | " .. o3, colors.gray, colors.black)
+            centerText(cx2 - 16, cy2 + 4, 33, "Press any button to play", colors.lightGray, colors.black)
+
+            audio.playShuffle()
+            local key = waitKey(0.25)
+            if key == "RESIZE" then
+                -- keep looping
+            elseif key ~= "TICK" then
+                return key
+            end
+        end
+    end
+
     while true do
         refreshSize()
         local w2, h2 = term.getSize()
@@ -349,7 +385,10 @@ local function runOneGame()
         centerText(cx2 - 16, cy2 + 1, 33, "[L] -    [C] Start    [R] +", colors.gray, colors.black)
         centerText(cx2 - 16, cy2 + 3, 33, "[E]/[Backspace] Exit", colors.gray, colors.black)
 
-        local key = waitKey()
+        local key = waitKey(8)
+        if key == "TICK" then
+            key = runAttractModeNewGame()
+        end
         if key == "RESIZE" then
             -- redraw immediately with new size
             goto continue_player_select

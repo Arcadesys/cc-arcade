@@ -55,6 +55,8 @@ foreach ($file in $files) {
 $footer = @'
 
 -- Optional: set default game for this machine
+local input = require('input')
+
 local function readExistingArcadeConfig()
     if not fs.exists('.arcade_config') then return nil end
     local f = fs.open('.arcade_config', 'r')
@@ -77,18 +79,8 @@ local function deleteArcadeConfig()
 end
 
 local function configureDefaultGame()
-    local existing = readExistingArcadeConfig()
-    print('')
-    print('DEFAULT GAME CONFIG')
-    print('===================')
-    print('Current: ' .. tostring(existing or '<none>'))
-    print('')
-    print('Pick a default game for this computer.')
-    print('(Press Enter to keep current.)')
-    print('')
-
     local options = {
-        { name = 'Arcade Menu (admin key required if kiosk)', cmd = 'menu' },
+        { name = 'Arcade Menu', cmd = 'menu' },
         { name = "Can't Stop (Free)", cmd = 'cant_stop' },
         { name = 'Horse Race', cmd = 'race' },
         { name = 'Super Slots', cmd = 'slots' },
@@ -97,44 +89,112 @@ local function configureDefaultGame()
         { name = 'RPS Rogue', cmd = 'rps_rogue' },
         { name = 'Roulette Watch', cmd = 'screensavers/roulette' },
         { name = 'Exchange', cmd = 'exchange' },
-        { name = 'Cashier System', cmd = 'cashier' }
+        { name = 'Cashier System', cmd = 'cashier' },
+        { name = 'Update Arcade', cmd = 'update' },
+        { name = 'Keep Current / Skip', cmd = nil }
     }
 
+    local selected = 1
+    local existing = readExistingArcadeConfig()
+
+    -- Find existing option index
     for i, opt in ipairs(options) do
-        print(tostring(i) .. ') ' .. opt.name .. '  [' .. opt.cmd .. ']')
-    end
-    print('')
-    print("Type a number, or type a command, or type 'none' to clear:")
-    write('> ')
-    local choice = read()
-    choice = (choice or ''):gsub('%s+', '')
-
-    if choice == '' then
-        return
-    end
-    if choice == 'none' then
-        deleteArcadeConfig()
-        print('Cleared .arcade_config')
-        return
+        if opt.cmd == existing then
+            selected = i
+            break
+        end
     end
 
-    local idx = tonumber(choice)
-    local cmd = nil
-    if idx and options[idx] then
-        cmd = options[idx].cmd
-    else
-        cmd = choice
+    local w, h = term.getSize()
+
+    local function drawMenu()
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        term.setTextColor(colors.yellow)
+        term.setCursorPos(1, 1)
+        print('DEFAULT GAME CONFIG')
+        term.setTextColor(colors.gray)
+        print('Current: ' .. tostring(existing or '<none>'))
+        print('')
+        term.setTextColor(colors.white)
+        print('[L] Up  [C] Select  [R] Down')
+        print('')
+
+        for i, opt in ipairs(options) do
+            term.setCursorPos(1, 5 + i)
+            if i == selected then
+                term.setTextColor(colors.lime)
+                term.write('> ' .. opt.name)
+            else
+                term.setTextColor(colors.white)
+                term.write('  ' .. opt.name)
+            end
+        end
+
+        term.setTextColor(colors.gray)
+        term.setCursorPos(1, h)
+        term.write('Kiosk mode active unless admin.key disk inserted')
     end
 
-    writeArcadeConfig(cmd)
-    print('Set .arcade_config to: ' .. cmd)
-    print('')
-    print("Note: configured machines run in kiosk mode by default.")
-    print("Insert a disk containing 'admin.key' to bypass kiosk.")
+    drawMenu()
+
+    while true do
+        local event, p1 = os.pullEvent()
+        local button = input.getButton(event, p1)
+
+        if button == 'LEFT' then
+            selected = selected - 1
+            if selected < 1 then selected = #options end
+            drawMenu()
+        elseif button == 'RIGHT' then
+            selected = selected + 1
+            if selected > #options then selected = 1 end
+            drawMenu()
+        elseif button == 'CENTER' then
+            local choice = options[selected]
+            if choice.cmd == nil then
+                -- Keep current / skip
+                return
+            end
+            writeArcadeConfig(choice.cmd)
+            term.setTextColor(colors.lime)
+            print('')
+            print('Set default to: ' .. choice.cmd)
+            sleep(1)
+            return
+        end
+
+        -- Also allow keyboard for convenience
+        if event == 'key' then
+            local name = keys.getName(p1)
+            if name == 'up' then
+                selected = selected - 1
+                if selected < 1 then selected = #options end
+                drawMenu()
+            elseif name == 'down' then
+                selected = selected + 1
+                if selected > #options then selected = 1 end
+                drawMenu()
+            elseif name == 'enter' then
+                local choice = options[selected]
+                if choice.cmd == nil then
+                    return
+                end
+                writeArcadeConfig(choice.cmd)
+                term.setTextColor(colors.lime)
+                print('')
+                print('Set default to: ' .. choice.cmd)
+                sleep(1)
+                return
+            end
+        end
+    end
 end
 
 print('Installation Complete!')
+sleep(1)
 configureDefaultGame()
+print('')
 print('Rebooting in 2 seconds...')
 sleep(2)
 os.reboot()

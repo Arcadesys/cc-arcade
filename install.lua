@@ -438,6 +438,140 @@ local function drawTable(players, dealerHand, currentPlayerIdx, message, showDea
     drawText(colW*2 + math.floor((w - colW*2)/2 - #c3/2)+1, h, c3, colors.white, colors.blue)
 end
 
+local function waitForBreakEvent(seconds)
+    local timerId
+    if seconds and seconds > 0 then
+        timerId = os.startTimer(seconds)
+    end
+
+    while true do
+        local e, p1 = os.pullEvent()
+
+        if e == "disk" then
+            return { type = "disk", event = e, p1 = p1 }
+        end
+        if e == "disk_eject" then
+            return { type = "disk_eject", event = e, p1 = p1 }
+        end
+
+        local button = input.getButton(e, p1)
+        if button then
+            return { type = "button", button = button, event = e, p1 = p1 }
+        end
+
+        if e == "key" or e == "char" then
+            return { type = "key", event = e, p1 = p1 }
+        end
+
+        if timerId and e == "timer" and p1 == timerId then
+            return { type = "timeout" }
+        end
+    end
+end
+
+local function runAttractMode()
+    local function cpuWantsHit(hand)
+        local score = calculateHand(hand)
+        if score <= 11 then return true end
+        if score >= 17 then return false end
+        return score < 16
+    end
+
+    while true do
+        local players = {
+            { hand = {}, status = "Playing", name = "CPU 1" },
+            { hand = {}, status = "Playing", name = "CPU 2" },
+            { hand = {}, status = "Playing", name = "CPU 3" }
+        }
+
+        local deck = createDeck()
+        local dealerHand = {}
+
+        -- Initial deal
+        for _ = 1, 2 do
+            for _, p in ipairs(players) do
+                table.insert(p.hand, drawCardDeck(deck))
+                drawTable(players, dealerHand, 0, "ATTRACTION MODE - Insert Disk to Play", false)
+                local brk = waitForBreakEvent(0.15)
+                if brk and brk.type == "disk" then return brk end
+            end
+
+            table.insert(dealerHand, drawCardDeck(deck))
+            drawTable(players, dealerHand, 0, "ATTRACTION MODE - Insert Disk to Play", false)
+            local brk = waitForBreakEvent(0.15)
+            if brk and brk.type == "disk" then return brk end
+        end
+
+        -- CPU turns
+        for i, p in ipairs(players) do
+            while true do
+                local score = calculateHand(p.hand)
+                if score == 21 and #p.hand == 2 then
+                    p.status = "Blackjack!"
+                    break
+                elseif score > 21 then
+                    p.status = "Bust!"
+                    break
+                end
+
+                if cpuWantsHit(p.hand) then
+                    table.insert(p.hand, drawCardDeck(deck))
+                    drawTable(players, dealerHand, i, "ATTRACTION MODE - " .. p.name .. " hits", false)
+                    local brk = waitForBreakEvent(0.35)
+                    if brk and brk.type == "disk" then return brk end
+                else
+                    p.status = "Stand"
+                    drawTable(players, dealerHand, i, "ATTRACTION MODE - " .. p.name .. " stands", false)
+                    local brk = waitForBreakEvent(0.35)
+                    if brk and brk.type == "disk" then return brk end
+                    break
+                end
+            end
+        end
+
+        -- Dealer turn
+        drawTable(players, dealerHand, 0, "ATTRACTION MODE - Dealer reveals", true)
+        local brk = waitForBreakEvent(0.8)
+        if brk and brk.type == "disk" then return brk end
+
+        while calculateHand(dealerHand) < 17 do
+            table.insert(dealerHand, drawCardDeck(deck))
+            drawTable(players, dealerHand, 0, "ATTRACTION MODE - Dealer hits", true)
+            brk = waitForBreakEvent(0.6)
+            if brk and brk.type == "disk" then return brk end
+        end
+
+        -- Resolve (no credits; just show outcomes)
+        local dealerScore = calculateHand(dealerHand)
+        local dealerBust = dealerScore > 21
+
+        for _, p in ipairs(players) do
+            local pScore = calculateHand(p.hand)
+            if p.status == "Bust!" then
+                p.status = "LOSE"
+            elseif p.status == "Blackjack!" then
+                p.status = "WIN!"
+            elseif dealerBust then
+                p.status = "WIN!"
+            elseif pScore > dealerScore then
+                p.status = "WIN!"
+            elseif pScore == dealerScore then
+                p.status = "PUSH"
+            else
+                p.status = "LOSE"
+            end
+        end
+
+        drawTable(players, dealerHand, 0, "ATTRACTION MODE - Round over (Insert Disk)", true)
+        brk = waitForBreakEvent(2.0)
+        if brk and brk.type == "disk" then return brk end
+
+        -- Small pause before next round
+        brk = waitForBreakEvent(0.6)
+        if brk and brk.type == "disk" then return brk end
+    end
+end
+
 --------------------------------------------------------------------------------
 -- MAIN LOOP
 --------------------------------------------------------------------------------
@@ -456,8 +590,26 @@ local function main()
         
         -- Lobby Loop
         local detectedCards = {}
+        local attractDelay = 8
+        local attractTimer = os.startTimer(attractDelay)
         while true do
             local event, p1 = os.pullEvent()
+
+            if event == "timer" and p1 == attractTimer and #detectedCards == 0 then
+                -- CPU vs CPU demo until a disk is inserted (attract mode)
+                runAttractMode()
+
+                -- Redraw lobby after attract mode
+                term.setBackgroundColor(colors.black)
+                term.clear()
+                drawCenter(h/2 - 2, "BLACKJACK", colors.lime, colors.black)
+                drawCenter(h/2, "Insert Cards (Max 3)", colors.white, colors.black)
+                drawCenter(h/2 + 2, "[C] Start Game   [R] Exit", colors.gray, colors.black)
+
+                -- Refresh cards and reset timer
+                detectedCards = creditsAPI.findCards()
+                attractTimer = os.startTimer(attractDelay)
+            end
 
             -- Arcade button controls (works for redstone + key-based configs)
             local button = input.getButton(event, p1)
@@ -466,6 +618,7 @@ local function main()
                 drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
                 sleep(1)
                 term.setCursorPos(1, h/2+4) term.clearLine()
+                attractTimer = os.startTimer(attractDelay)
             elseif button == "RIGHT" then
                 term.setBackgroundColor(colors.black)
                 term.clear()
@@ -480,6 +633,7 @@ local function main()
                     drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
                     sleep(1)
                     term.setCursorPos(1, h/2+4) term.clearLine()
+                    attractTimer = os.startTimer(attractDelay)
                 elseif key == "backspace" or key == "e" then -- Exit
                      term.setBackgroundColor(colors.black)
                      term.clear()
@@ -489,6 +643,7 @@ local function main()
             elseif event == "disk" or event == "disk_eject" then
                 -- Refresh cards
                 detectedCards = creditsAPI.findCards()
+                attractTimer = os.startTimer(attractDelay)
                 term.setCursorPos(1, h/2 + 4)
                 term.clearLine()
                 local msg = "Players: "
@@ -502,6 +657,7 @@ local function main()
             if #detectedCards == 0 then
                  detectedCards = creditsAPI.findCards()
                  if #detectedCards > 0 then
+                    attractTimer = os.startTimer(attractDelay)
                     term.setCursorPos(1, h/2 + 4)
                     term.clearLine()
                     local msg = "Players: "
@@ -1021,6 +1177,42 @@ end
 local function runOneGame()
     -- returns true if player requested EXIT
     local numPlayers = 1
+
+    local function runAttractModeNewGame()
+        while true do
+            refreshSize()
+            local w2, h2 = term.getSize()
+            local cx2, cy2 = math.floor(w2 / 2), math.floor(h2 / 2)
+
+            term.setBackgroundColor(colors.black)
+            term.clear()
+            drawTitleBar("CAN'T STOP", "DEMO")
+
+            frameRect(cx2 - 16, cy2 - 4, 33, 9, colors.gray, colors.black)
+            centerText(cx2 - 16, cy2 - 4, 33, " ATTRACTION MODE ", colors.yellow, colors.gray)
+            centerText(cx2 - 16, cy2 - 2, 33, "Rolling dice...", colors.white, colors.black)
+
+            local dice = rollDice()
+            local d = tostring(dice[1]) .. "  " .. tostring(dice[2]) .. "  " .. tostring(dice[3]) .. "  " .. tostring(dice[4])
+            centerText(cx2 - 16, cy2, 33, d, colors.lime, colors.black)
+
+            local opts = getPairings(dice)
+            local o1 = tostring(opts[1][1]) .. "+" .. tostring(opts[1][2])
+            local o2 = tostring(opts[2][1]) .. "+" .. tostring(opts[2][2])
+            local o3 = tostring(opts[3][1]) .. "+" .. tostring(opts[3][2])
+            centerText(cx2 - 16, cy2 + 2, 33, "Options: " .. o1 .. " | " .. o2 .. " | " .. o3, colors.gray, colors.black)
+            centerText(cx2 - 16, cy2 + 4, 33, "Press any button to play", colors.lightGray, colors.black)
+
+            audio.playShuffle()
+            local key = waitKey(0.25)
+            if key == "RESIZE" then
+                -- keep looping
+            elseif key ~= "TICK" then
+                return key
+            end
+        end
+    end
+
     while true do
         refreshSize()
         local w2, h2 = term.getSize()
@@ -1035,7 +1227,10 @@ local function runOneGame()
         centerText(cx2 - 16, cy2 + 1, 33, "[L] -    [C] Start    [R] +", colors.gray, colors.black)
         centerText(cx2 - 16, cy2 + 3, 33, "[E]/[Backspace] Exit", colors.gray, colors.black)
 
-        local key = waitKey()
+        local key = waitKey(8)
+        if key == "TICK" then
+            key = runAttractModeNewGame()
+        end
         if key == "RESIZE" then
             -- redraw immediately with new size
             goto continue_player_select
@@ -2835,6 +3030,7 @@ local games = {
     { name = "Can't Stop (Free)", cmd = "cant_stop" },
     { name = "RPS Rogue", cmd = "rps_rogue" },
     { name = "Roulette Watch", cmd = "screensavers/roulette" },
+    { name = "Update Arcade", cmd = "update" },
     { name = "Exit", cmd = "exit" },
     { name = "Reboot", cmd = "reboot" },
     { name = "Shutdown", cmd = "shutdown" }
@@ -3097,6 +3293,82 @@ local function waitButtonOrExit()
     end
 end
 
+local function waitForBreakEvent(seconds)
+    local timerId
+    if seconds and seconds > 0 then
+        timerId = os.startTimer(seconds)
+    end
+
+    while true do
+        local event, p1 = os.pullEvent()
+
+        if event == "disk" then
+            return { type = "disk", event = event, p1 = p1 }
+        end
+
+        local button = input.getButton(event, p1)
+        if button then
+            if event == "redstone" then sleep(0.2) end
+            return { type = "button", button = button, event = event, p1 = p1 }
+        end
+
+        if event == "key" then
+            local name = keys.getName(p1)
+            if name == "backspace" then return { type = "exit" } end
+            return { type = "key", event = event, p1 = p1 }
+        elseif event == "char" then
+            if tostring(p1):lower() == "e" then return { type = "exit" } end
+            return { type = "key", event = event, p1 = p1 }
+        elseif event == "terminate" then
+            return { type = "exit" }
+        end
+
+        if timerId and event == "timer" and p1 == timerId then
+            return { type = "timeout" }
+        end
+    end
+end
+
+local function runAttractModeRace()
+    while true do
+        clear(colors.black)
+        drawHeader(0)
+        drawCenter(3, "ATTRACTION MODE", colors.yellow, colors.black)
+        drawCenter(5, "Demo Race - Insert Disk / Press Any Button", colors.white, colors.black)
+        local brk = waitForBreakEvent(0.8)
+        if brk and brk.type ~= "timeout" then return brk end
+
+        local trackLen = computeTrackLen()
+        local positions = { 1, 1, 1 }
+        local winner = nil
+
+        local raceDelay = 0.10
+        while not winner do
+            for i, horse in ipairs(horses) do
+                local progress = positions[i] / trackLen
+                local step = stepForHorse(horse, progress)
+                positions[i] = clamp(positions[i] + step, 1, trackLen)
+                if positions[i] >= trackLen then
+                    winner = i
+                    break
+                end
+            end
+
+            drawTrack(trackLen, positions)
+            drawCenter(h - 2, "ATTRACTION MODE - Insert Disk / Press Any Button", colors.gray, colors.black)
+            audio.playShuffle()
+            brk = waitForBreakEvent(raceDelay)
+            if brk and brk.type ~= "timeout" then return brk end
+        end
+
+        drawTrack(trackLen, positions, winner)
+        drawCenter(h - 2, "ATTRACTION MODE - Winner: " .. horses[winner].name, colors.lime, colors.black)
+        audio.playWin()
+        brk = waitForBreakEvent(2.0)
+        if brk and brk.type ~= "timeout" then return brk end
+    end
+end
+
 local function oddsString(h)
     return tostring(h.oddsNum) .. ":" .. tostring(h.oddsDen)
 end
@@ -3258,10 +3530,20 @@ local function main()
         local credits = creditsAPI.get()
         drawBetScreen(credits)
 
-        local button = waitButtonOrExit()
-        if button == "EXIT" then
+        local brk = waitForBreakEvent(8)
+        if brk and brk.type == "timeout" then
+            brk = runAttractModeRace()
+        end
+
+        if brk and brk.type == "exit" then
             break
         end
+        if not brk or brk.type == "disk" then
+            -- disk inserted / changed: just redraw bet screen
+            goto continue_main
+        end
+
+        local button = brk.button
 
         local betHorse = nil
         if button == "LEFT" then betHorse = 1 end
@@ -3324,6 +3606,8 @@ local function main()
                 waitButtonOrExit()
             end
         end
+
+        ::continue_main::
     end
 
     term.setBackgroundColor(colors.black)
@@ -3345,6 +3629,25 @@ local w, h = term.getSize()
 
 -- 3-Button Config
 local input = require("input")
+
+local function waitForDiskOrTimeout(seconds)
+    local timerId
+    if seconds and seconds > 0 then
+        timerId = os.startTimer(seconds)
+    end
+
+    while true do
+        local e, p1 = os.pullEvent()
+
+        if e == "disk" then
+            return { type = "disk", event = e, p1 = p1 }
+        end
+
+        if timerId and e == "timer" and p1 == timerId then
+            return { type = "timeout" }
+        end
+    end
+end
 
 local function waitKey()
     while true do
@@ -3522,13 +3825,41 @@ local creditsAPI = require("credits")
 local audio = require("audio")
 
 local function main()
-    if creditsAPI.get() < 5 then
+    while creditsAPI.get() < 5 do
+        term.setBackgroundColor(colors.black)
         term.clear()
-        term.setCursorPos(1, h/2)
-        term.setTextColor(colors.red)
+        term.setCursorPos(1, 1)
+        term.setBackgroundColor(colors.red)
+        term.setTextColor(colors.white)
+        term.clearLine()
+        term.write(" RPS ROGUE ")
+
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.white)
+        term.setCursorPos(2, math.floor(h/2) - 2)
         term.write("Insert Coin: 5 Credits")
-        sleep(2)
-        return
+        term.setCursorPos(2, math.floor(h/2))
+        term.setTextColor(colors.gray)
+        term.write("ATTRACTION MODE - Insert Disk to Play")
+
+        -- Simple demo text that cycles until a disk is inserted.
+        local demoLines = {
+            "Rock beats Scissors",
+            "Paper beats Rock",
+            "Scissors beats Paper",
+            "Level up and keep going!",
+        }
+
+        for i = 1, #demoLines do
+            term.setCursorPos(2, math.floor(h/2) + 2)
+            term.setTextColor(colors.yellow)
+            term.clearLine()
+            term.write(demoLines[i])
+            local brk = waitForDiskOrTimeout(1.0)
+            if brk and brk.type == "disk" then
+                break
+            end
+        end
     end
     creditsAPI.remove(5)
 
@@ -4290,6 +4621,118 @@ local function spin(player)
     end
 end
 
+local function waitForBreakEvent(seconds)
+    local timerId
+    if seconds and seconds > 0 then
+        timerId = os.startTimer(seconds)
+    end
+
+    while true do
+        local e, p1 = os.pullEvent()
+
+        if e == "disk" then
+            return { type = "disk", event = e, p1 = p1 }
+        end
+
+        local button = input.getButton(e, p1)
+        if button then
+            return { type = "button", button = button, event = e, p1 = p1 }
+        end
+
+        if e == "key" or e == "char" then
+            return { type = "key", event = e, p1 = p1 }
+        end
+
+        if timerId and e == "timer" and p1 == timerId then
+            return { type = "timeout" }
+        end
+    end
+end
+
+local function runAttractMode()
+    local fakeName = "CPU"
+    local fakeCredits = 999
+
+    local function computeWin(bet)
+        local function getSym(r, offset)
+            return REELS[r][(reelPos[r] + offset - 1) % #REELS[r] + 1]
+        end
+        local function checkLine(offset)
+            local s1, s2, s3 = getSym(1, offset), getSym(2, offset), getSym(3, offset)
+            if s1 == s2 and s2 == s3 then return PAYOUTS[s1] end
+            if s1 == "Cherry" and s2 == "Cherry" then return 5 end
+            return 0
+        end
+
+        local win = 0
+        if bet >= 1 then win = win + checkLine(1) end
+        if bet >= 2 then win = win + checkLine(0) end
+        if bet >= 3 then win = win + checkLine(2) end
+        return win
+    end
+
+    local function demoSpinOnce(bet)
+        -- Animation
+        for _ = 1, 20 do
+            for r = 1, 3 do
+                reelPos[r] = (reelPos[r] % #REELS[r]) + 1
+            end
+            drawMachine(bet, "ATTRACTION MODE - Spinning... (Insert Disk)", fakeName, fakeCredits)
+            audio.playShuffle()
+            local brk = waitForBreakEvent(0.05)
+            if brk and brk.type == "disk" then return brk end
+        end
+
+        -- Stop one by one
+        for r = 1, 3 do
+            for i = 1, 10 do
+                reelPos[r] = (reelPos[r] % #REELS[r]) + 1
+                for k = r + 1, 3 do
+                    reelPos[k] = (reelPos[k] % #REELS[k]) + 1
+                end
+                drawMachine(bet, "ATTRACTION MODE - Spinning... (Insert Disk)", fakeName, fakeCredits)
+                local brk = waitForBreakEvent(0.05 + i * 0.01)
+                if brk and brk.type == "disk" then return brk end
+            end
+            audio.playSlotStop()
+        end
+
+        local win = computeWin(bet)
+        if win > 0 then
+            audio.playWin()
+            for _ = 1, 3 do
+                drawMachine(bet, "ATTRACTION MODE - WINNER! " .. tostring(win), fakeName, fakeCredits)
+                local brk = waitForBreakEvent(0.12)
+                if brk and brk.type == "disk" then return brk end
+                term.setBackgroundColor(colors.lime)
+                term.clear()
+                brk = waitForBreakEvent(0.08)
+                if brk and brk.type == "disk" then return brk end
+            end
+        else
+            audio.playLose()
+            drawMachine(bet, "ATTRACTION MODE - Try again! (Insert Disk)", fakeName, fakeCredits)
+            local brk = waitForBreakEvent(0.8)
+            if brk and brk.type == "disk" then return brk end
+        end
+        return nil
+    end
+
+    while true do
+        local bet = math.random(1, 3)
+        drawMachine(bet, "ATTRACTION MODE - Insert Disk to Play", nil, nil)
+        local brk = waitForBreakEvent(0.6)
+        if brk and brk.type == "disk" then return brk end
+
+        brk = demoSpinOnce(bet)
+        if brk and brk.type == "disk" then return brk end
+
+        drawMachine(bet, "ATTRACTION MODE - Next spin... (Insert Disk)", nil, nil)
+        brk = waitForBreakEvent(0.8)
+        if brk and brk.type == "disk" then return brk end
+    end
+end
+
 --------------------------------------------------------------------------------
 -- MAIN LOOP
 --------------------------------------------------------------------------------
@@ -4326,8 +4769,47 @@ local function main()
         
         -- Lobby Loop
         local detectedCards = {}
+        local attractDelay = 8
+        local attractTimer = os.startTimer(attractDelay)
         while true do
             local event, p1 = os.pullEvent()
+
+            if event == "timer" and p1 == attractTimer and #detectedCards == 0 then
+                -- CPU demo until a disk is inserted (attract mode)
+                runAttractMode()
+
+                -- Redraw lobby after attract mode
+                term.setBackgroundColor(colors.black)
+                term.clear()
+                if w >= 34 and h >= 19 then
+                    blitFill(1, 1, w, 1, " ", colors.white, colors.blue)
+                    centerTextIn(1, 1, w, " SUPER SLOTS ", colors.yellow, colors.blue)
+                    local artX = clamp(cx - 16, 2, w - 32)
+                    local artY = clamp(cy - 6, 2, h - 12)
+                    shadowRect(artX, artY, 32, 10, colors.black)
+                    frameRect(artX, artY, 32, 10, colors.gray, colors.lightGray)
+                    blitFill(artX + 1, artY + 1, 30, 1, " ", colors.white, colors.orange)
+                    centerTextIn(artX + 1, artY + 1, 30, " INSERT CARDS ", colors.white, colors.orange)
+
+                    frameRect(artX + 4, artY + 3, 7, 5, colors.gray, colors.white)
+                    frameRect(artX + 13, artY + 3, 7, 5, colors.gray, colors.white)
+                    frameRect(artX + 22, artY + 3, 7, 5, colors.gray, colors.white)
+                    centerTextIn(artX + 4, artY + 5, 7, "@@@", colors.red, colors.white)
+                    centerTextIn(artX + 13, artY + 5, 7, "===", colors.lightGray, colors.white)
+                    centerTextIn(artX + 22, artY + 5, 7, "777", colors.red, colors.white)
+
+                    drawCenter(artY + 10, "Insert Cards (Max 3)", colors.white, colors.black)
+                    drawCenter(artY + 12, "[C] Start   [R] Exit", colors.gray, colors.black)
+                else
+                    drawCenter(h/2 - 2, "SUPER SLOTS", colors.gold, colors.black)
+                    drawCenter(h/2, "Insert Cards (Max 3)", colors.white, colors.black)
+                    drawCenter(h/2 + 2, "[C] Start   [R] Exit", colors.gray, colors.black)
+                end
+
+                -- Refresh cards and reset timer
+                detectedCards = creditsAPI.findCards()
+                attractTimer = os.startTimer(attractDelay)
+            end
 
             -- Arcade button controls (works for redstone + key-based configs)
             local button = input.getButton(event, p1)
@@ -4336,6 +4818,7 @@ local function main()
                 drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
                 sleep(1)
                 term.setCursorPos(1, h/2+4) term.clearLine()
+                attractTimer = os.startTimer(attractDelay)
             elseif button == "RIGHT" then
                 term.setBackgroundColor(colors.black)
                 term.clear()
@@ -4350,6 +4833,7 @@ local function main()
                     drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
                     sleep(1)
                     term.setCursorPos(1, h/2+4) term.clearLine()
+                    attractTimer = os.startTimer(attractDelay)
                 elseif key == "backspace" or key == "e" then -- Exit
                      term.setBackgroundColor(colors.black)
                      term.clear()
@@ -4359,6 +4843,7 @@ local function main()
             elseif event == "disk" or event == "disk_eject" then
                 -- Refresh cards
                 detectedCards = creditsAPI.findCards()
+                attractTimer = os.startTimer(attractDelay)
                 term.setCursorPos(1, h/2 + 4)
                 term.clearLine()
                 local msg = "Players: "
@@ -4372,6 +4857,7 @@ local function main()
              if #detectedCards == 0 then
                  detectedCards = creditsAPI.findCards()
                  if #detectedCards > 0 then
+                    attractTimer = os.startTimer(attractDelay)
                     term.setCursorPos(1, h/2 + 4)
                     term.clearLine()
                     local msg = "Players: "
@@ -4495,13 +4981,93 @@ local function shouldKiosk()
     return false
 end
 
+-- Remote Update Function
+local function runRemoteUpdate()
+    term.clear()
+    term.setCursorPos(1, 1)
+    term.setTextColor(colors.yellow)
+    print("ARCADE OS UPDATER")
+    print("=================")
+    term.setTextColor(colors.white)
+    
+    -- Read update URL from .update_url or use default
+    local DEFAULT_URL = "https://raw.githubusercontent.com/Arcadesys/cc-arcade/main/install.lua"
+    local url = DEFAULT_URL
+    if fs.exists(".update_url") then
+        local f = fs.open(".update_url", "r")
+        if f then
+            local custom = (f.readAll() or ""):gsub("%s+", "")
+            f.close()
+            if custom ~= "" then url = custom end
+        end
+    end
+    
+    if not http then
+        term.setTextColor(colors.red)
+        print("")
+        print("ERROR: HTTP is disabled!")
+        print("Enable HTTP in ComputerCraft config.")
+        print("")
+        print("Press any key to continue boot...")
+        os.pullEvent("key")
+        return false
+    end
+    
+    print("")
+    print("Downloading from:")
+    term.setTextColor(colors.gray)
+    print(url:sub(1, 45) .. (url:len() > 45 and "..." or ""))
+    term.setTextColor(colors.white)
+    print("")
+    
+    local response, err = http.get(url)
+    if not response then
+        term.setTextColor(colors.red)
+        print("Download failed: " .. tostring(err))
+        print("")
+        print("Press any key to continue boot...")
+        os.pullEvent("key")
+        return false
+    end
+    
+    local content = response.readAll()
+    response.close()
+    
+    if not content or #content < 100 then
+        term.setTextColor(colors.red)
+        print("Invalid response (too short)")
+        print("")
+        print("Press any key to continue boot...")
+        os.pullEvent("key")
+        return false
+    end
+    
+    -- Backup and write
+    if fs.exists("install.lua") then
+        if fs.exists("install.lua.bak") then fs.delete("install.lua.bak") end
+        fs.copy("install.lua", "install.lua.bak")
+    end
+    
+    local f = fs.open("install.lua", "w")
+    f.write(content)
+    f.close()
+    
+    term.setTextColor(colors.lime)
+    print("Download complete!")
+    print("Running installer...")
+    sleep(1)
+    
+    shell.run("install.lua")
+    return true
+end
+
 if shouldKiosk() and fs.exists("kiosk.lua") then
     _G.ARCADE_KIOSK = true
     shell.run("kiosk.lua")
     os.reboot()
 end
 
-print("Press 'D' for Dev Mode (2s)...")
+print("Press 'D' Dev Mode, 'U' Update (2s)...")
 
 _G.ARCADE_DEV_MODE = false
 local timer = os.startTimer(2)
@@ -4513,6 +5079,11 @@ while true do
         _G.ARCADE_DEV_MODE = true
         print("DEV MODE ENABLED: Infinite Credits")
         sleep(1)
+        break
+    elseif event == "char" and p1:lower() == "u" then
+        runRemoteUpdate()
+        -- After update, installer reboots, so we won't reach here
+        -- But if update fails, continue boot
         break
     end
 end
@@ -4546,8 +5117,222 @@ end
 
 ]])
 
+writeFile('update.lua', [[
+-- update.lua
+-- Arcade OS Updater
+-- Downloads and installs the latest version from the configured URL
+
+local w, h = term.getSize()
+
+-- ============================================================================
+-- CONFIGURATION
+-- Default update URL points to the official Arcadesys/cc-arcade repo.
+-- Override by creating .update_url file with a custom URL.
+-- ============================================================================
+local UPDATE_URL = "https://raw.githubusercontent.com/Arcadesys/cc-arcade/main/install.lua"
+
+local function centerText(y, text, fg, bg)
+    term.setBackgroundColor(bg or colors.black)
+    term.setTextColor(fg or colors.white)
+    local x = math.floor((w - #text) / 2) + 1
+    term.setCursorPos(x, y)
+    term.write(text)
+end
+
+local function drawHeader()
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.yellow)
+    term.setCursorPos(1, 1)
+    term.clearLine()
+    centerText(1, "ARCADE OS UPDATER", colors.yellow, colors.blue)
+end
+
+local function readUpdateUrl()
+    if UPDATE_URL then return UPDATE_URL end
+    if fs.exists(".update_url") then
+        local f = fs.open(".update_url", "r")
+        if f then
+            local url = f.readAll()
+            f.close()
+            url = (url or ""):gsub("%s+", "")
+            if url ~= "" then return url end
+        end
+    end
+    return nil
+end
+
+local function saveUpdateUrl(url)
+    local f = fs.open(".update_url", "w")
+    if f then
+        f.write(url)
+        f.close()
+    end
+end
+
+local function promptForUrl()
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    drawHeader()
+    
+    centerText(4, "No update URL configured.", colors.yellow, colors.black)
+    centerText(6, "Enter the URL to your install.lua:", colors.white, colors.black)
+    centerText(7, "(GitHub raw, Pastebin raw, or custom)", colors.gray, colors.black)
+    
+    term.setCursorPos(2, 9)
+    term.setTextColor(colors.lime)
+    term.write("> ")
+    term.setTextColor(colors.white)
+    
+    local url = read()
+    if url and url:match("^https?://") then
+        saveUpdateUrl(url)
+        return url
+    end
+    return nil
+end
+
+local function downloadInstaller(url)
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    drawHeader()
+    
+    centerText(5, "Downloading update...", colors.yellow, colors.black)
+    centerText(7, url:sub(1, w - 4), colors.gray, colors.black)
+    
+    -- Check if HTTP is enabled
+    if not http then
+        centerText(10, "ERROR: HTTP is disabled!", colors.red, colors.black)
+        centerText(12, "Enable HTTP in ComputerCraft config", colors.white, colors.black)
+        centerText(13, "or server settings.", colors.white, colors.black)
+        sleep(3)
+        return nil
+    end
+    
+    local response, err = http.get(url)
+    if not response then
+        centerText(10, "ERROR: Download failed!", colors.red, colors.black)
+        centerText(12, tostring(err or "Unknown error"), colors.gray, colors.black)
+        sleep(3)
+        return nil
+    end
+    
+    local content = response.readAll()
+    response.close()
+    
+    if not content or #content < 100 then
+        centerText(10, "ERROR: Invalid response!", colors.red, colors.black)
+        sleep(3)
+        return nil
+    end
+    
+    return content
+end
+
+local function installUpdate(content)
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    drawHeader()
+    
+    centerText(5, "Installing update...", colors.yellow, colors.black)
+    
+    -- Backup current install.lua
+    if fs.exists("install.lua") then
+        if fs.exists("install.lua.bak") then
+            fs.delete("install.lua.bak")
+        end
+        fs.copy("install.lua", "install.lua.bak")
+    end
+    
+    -- Write new installer
+    local f = fs.open("install.lua", "w")
+    if not f then
+        centerText(8, "ERROR: Could not write file!", colors.red, colors.black)
+        sleep(3)
+        return false
+    end
+    f.write(content)
+    f.close()
+    
+    centerText(7, "Running installer...", colors.lime, colors.black)
+    sleep(1)
+    
+    -- Run the installer
+    shell.run("install.lua")
+    return true
+end
+
+local function showMenu()
+    local url = readUpdateUrl()
+    
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    drawHeader()
+    
+    centerText(4, "ARCADE OS UPDATE UTILITY", colors.lime, colors.black)
+    
+    if url then
+        centerText(6, "Update URL:", colors.white, colors.black)
+        local displayUrl = #url > w - 6 and url:sub(1, w - 9) .. "..." or url
+        centerText(7, displayUrl, colors.gray, colors.black)
+    else
+        centerText(6, "No update URL configured", colors.yellow, colors.black)
+    end
+    
+    centerText(10, "[1] Check for Updates", colors.white, colors.black)
+    centerText(11, "[2] Configure Update URL", colors.white, colors.black)
+    centerText(12, "[3] Re-run Local Installer", colors.white, colors.black)
+    centerText(13, "[4] Exit", colors.white, colors.black)
+    
+    centerText(h - 1, "Press a key...", colors.gray, colors.black)
+    
+    while true do
+        local _, key = os.pullEvent("char")
+        if key == "1" then
+            if not url then
+                url = promptForUrl()
+            end
+            if url then
+                local content = downloadInstaller(url)
+                if content then
+                    installUpdate(content)
+                    return
+                end
+            else
+                centerText(h - 3, "No URL configured!", colors.red, colors.black)
+                sleep(2)
+            end
+            return showMenu()
+        elseif key == "2" then
+            url = promptForUrl()
+            return showMenu()
+        elseif key == "3" then
+            if fs.exists("install.lua") then
+                term.setBackgroundColor(colors.black)
+                term.clear()
+                shell.run("install.lua")
+            else
+                centerText(h - 3, "No local installer found!", colors.red, colors.black)
+                sleep(2)
+                return showMenu()
+            end
+            return
+        elseif key == "4" or key == "q" then
+            term.setBackgroundColor(colors.black)
+            term.clear()
+            return
+        end
+    end
+end
+
+-- Run the menu
+showMenu()
+
+]])
+
 
 -- Optional: set default game for this machine
+local input = require('input')
+
 local function readExistingArcadeConfig()
     if not fs.exists('.arcade_config') then return nil end
     local f = fs.open('.arcade_config', 'r')
@@ -4570,18 +5355,8 @@ local function deleteArcadeConfig()
 end
 
 local function configureDefaultGame()
-    local existing = readExistingArcadeConfig()
-    print('')
-    print('DEFAULT GAME CONFIG')
-    print('===================')
-    print('Current: ' .. tostring(existing or '<none>'))
-    print('')
-    print('Pick a default game for this computer.')
-    print('(Press Enter to keep current.)')
-    print('')
-
     local options = {
-        { name = 'Arcade Menu (admin key required if kiosk)', cmd = 'menu' },
+        { name = 'Arcade Menu', cmd = 'menu' },
         { name = "Can't Stop (Free)", cmd = 'cant_stop' },
         { name = 'Horse Race', cmd = 'race' },
         { name = 'Super Slots', cmd = 'slots' },
@@ -4590,44 +5365,112 @@ local function configureDefaultGame()
         { name = 'RPS Rogue', cmd = 'rps_rogue' },
         { name = 'Roulette Watch', cmd = 'screensavers/roulette' },
         { name = 'Exchange', cmd = 'exchange' },
-        { name = 'Cashier System', cmd = 'cashier' }
+        { name = 'Cashier System', cmd = 'cashier' },
+        { name = 'Update Arcade', cmd = 'update' },
+        { name = 'Keep Current / Skip', cmd = nil }
     }
 
+    local selected = 1
+    local existing = readExistingArcadeConfig()
+
+    -- Find existing option index
     for i, opt in ipairs(options) do
-        print(tostring(i) .. ') ' .. opt.name .. '  [' .. opt.cmd .. ']')
-    end
-    print('')
-    print("Type a number, or type a command, or type 'none' to clear:")
-    write('> ')
-    local choice = read()
-    choice = (choice or ''):gsub('%s+', '')
-
-    if choice == '' then
-        return
-    end
-    if choice == 'none' then
-        deleteArcadeConfig()
-        print('Cleared .arcade_config')
-        return
+        if opt.cmd == existing then
+            selected = i
+            break
+        end
     end
 
-    local idx = tonumber(choice)
-    local cmd = nil
-    if idx and options[idx] then
-        cmd = options[idx].cmd
-    else
-        cmd = choice
+    local w, h = term.getSize()
+
+    local function drawMenu()
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        term.setTextColor(colors.yellow)
+        term.setCursorPos(1, 1)
+        print('DEFAULT GAME CONFIG')
+        term.setTextColor(colors.gray)
+        print('Current: ' .. tostring(existing or '<none>'))
+        print('')
+        term.setTextColor(colors.white)
+        print('[L] Up  [C] Select  [R] Down')
+        print('')
+
+        for i, opt in ipairs(options) do
+            term.setCursorPos(1, 5 + i)
+            if i == selected then
+                term.setTextColor(colors.lime)
+                term.write('> ' .. opt.name)
+            else
+                term.setTextColor(colors.white)
+                term.write('  ' .. opt.name)
+            end
+        end
+
+        term.setTextColor(colors.gray)
+        term.setCursorPos(1, h)
+        term.write('Kiosk mode active unless admin.key disk inserted')
     end
 
-    writeArcadeConfig(cmd)
-    print('Set .arcade_config to: ' .. cmd)
-    print('')
-    print("Note: configured machines run in kiosk mode by default.")
-    print("Insert a disk containing 'admin.key' to bypass kiosk.")
+    drawMenu()
+
+    while true do
+        local event, p1 = os.pullEvent()
+        local button = input.getButton(event, p1)
+
+        if button == 'LEFT' then
+            selected = selected - 1
+            if selected < 1 then selected = #options end
+            drawMenu()
+        elseif button == 'RIGHT' then
+            selected = selected + 1
+            if selected > #options then selected = 1 end
+            drawMenu()
+        elseif button == 'CENTER' then
+            local choice = options[selected]
+            if choice.cmd == nil then
+                -- Keep current / skip
+                return
+            end
+            writeArcadeConfig(choice.cmd)
+            term.setTextColor(colors.lime)
+            print('')
+            print('Set default to: ' .. choice.cmd)
+            sleep(1)
+            return
+        end
+
+        -- Also allow keyboard for convenience
+        if event == 'key' then
+            local name = keys.getName(p1)
+            if name == 'up' then
+                selected = selected - 1
+                if selected < 1 then selected = #options end
+                drawMenu()
+            elseif name == 'down' then
+                selected = selected + 1
+                if selected > #options then selected = 1 end
+                drawMenu()
+            elseif name == 'enter' then
+                local choice = options[selected]
+                if choice.cmd == nil then
+                    return
+                end
+                writeArcadeConfig(choice.cmd)
+                term.setTextColor(colors.lime)
+                print('')
+                print('Set default to: ' .. choice.cmd)
+                sleep(1)
+                return
+            end
+        end
+    end
 end
 
 print('Installation Complete!')
+sleep(1)
 configureDefaultGame()
+print('')
 print('Rebooting in 2 seconds...')
 sleep(2)
 os.reboot()

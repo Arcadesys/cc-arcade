@@ -101,6 +101,82 @@ local function waitButtonOrExit()
     end
 end
 
+local function waitForBreakEvent(seconds)
+    local timerId
+    if seconds and seconds > 0 then
+        timerId = os.startTimer(seconds)
+    end
+
+    while true do
+        local event, p1 = os.pullEvent()
+
+        if event == "disk" then
+            return { type = "disk", event = event, p1 = p1 }
+        end
+
+        local button = input.getButton(event, p1)
+        if button then
+            if event == "redstone" then sleep(0.2) end
+            return { type = "button", button = button, event = event, p1 = p1 }
+        end
+
+        if event == "key" then
+            local name = keys.getName(p1)
+            if name == "backspace" then return { type = "exit" } end
+            return { type = "key", event = event, p1 = p1 }
+        elseif event == "char" then
+            if tostring(p1):lower() == "e" then return { type = "exit" } end
+            return { type = "key", event = event, p1 = p1 }
+        elseif event == "terminate" then
+            return { type = "exit" }
+        end
+
+        if timerId and event == "timer" and p1 == timerId then
+            return { type = "timeout" }
+        end
+    end
+end
+
+local function runAttractModeRace()
+    while true do
+        clear(colors.black)
+        drawHeader(0)
+        drawCenter(3, "ATTRACTION MODE", colors.yellow, colors.black)
+        drawCenter(5, "Demo Race - Insert Disk / Press Any Button", colors.white, colors.black)
+        local brk = waitForBreakEvent(0.8)
+        if brk and brk.type ~= "timeout" then return brk end
+
+        local trackLen = computeTrackLen()
+        local positions = { 1, 1, 1 }
+        local winner = nil
+
+        local raceDelay = 0.10
+        while not winner do
+            for i, horse in ipairs(horses) do
+                local progress = positions[i] / trackLen
+                local step = stepForHorse(horse, progress)
+                positions[i] = clamp(positions[i] + step, 1, trackLen)
+                if positions[i] >= trackLen then
+                    winner = i
+                    break
+                end
+            end
+
+            drawTrack(trackLen, positions)
+            drawCenter(h - 2, "ATTRACTION MODE - Insert Disk / Press Any Button", colors.gray, colors.black)
+            audio.playShuffle()
+            brk = waitForBreakEvent(raceDelay)
+            if brk and brk.type ~= "timeout" then return brk end
+        end
+
+        drawTrack(trackLen, positions, winner)
+        drawCenter(h - 2, "ATTRACTION MODE - Winner: " .. horses[winner].name, colors.lime, colors.black)
+        audio.playWin()
+        brk = waitForBreakEvent(2.0)
+        if brk and brk.type ~= "timeout" then return brk end
+    end
+end
+
 local function oddsString(h)
     return tostring(h.oddsNum) .. ":" .. tostring(h.oddsDen)
 end
@@ -262,10 +338,20 @@ local function main()
         local credits = creditsAPI.get()
         drawBetScreen(credits)
 
-        local button = waitButtonOrExit()
-        if button == "EXIT" then
+        local brk = waitForBreakEvent(8)
+        if brk and brk.type == "timeout" then
+            brk = runAttractModeRace()
+        end
+
+        if brk and brk.type == "exit" then
             break
         end
+        if not brk or brk.type == "disk" then
+            -- disk inserted / changed: just redraw bet screen
+            goto continue_main
+        end
+
+        local button = brk.button
 
         local betHorse = nil
         if button == "LEFT" then betHorse = 1 end
@@ -328,6 +414,8 @@ local function main()
                 waitButtonOrExit()
             end
         end
+
+        ::continue_main::
     end
 
     term.setBackgroundColor(colors.black)

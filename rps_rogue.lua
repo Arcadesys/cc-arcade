@@ -6,6 +6,25 @@ local w, h = term.getSize()
 -- 3-Button Config
 local input = require("input")
 
+local function waitForDiskOrTimeout(seconds)
+    local timerId
+    if seconds and seconds > 0 then
+        timerId = os.startTimer(seconds)
+    end
+
+    while true do
+        local e, p1 = os.pullEvent()
+
+        if e == "disk" then
+            return { type = "disk", event = e, p1 = p1 }
+        end
+
+        if timerId and e == "timer" and p1 == timerId then
+            return { type = "timeout" }
+        end
+    end
+end
+
 local function waitKey()
     while true do
         local e, p1 = os.pullEvent()
@@ -182,13 +201,41 @@ local creditsAPI = require("credits")
 local audio = require("audio")
 
 local function main()
-    if creditsAPI.get() < 5 then
+    while creditsAPI.get() < 5 do
+        term.setBackgroundColor(colors.black)
         term.clear()
-        term.setCursorPos(1, h/2)
-        term.setTextColor(colors.red)
+        term.setCursorPos(1, 1)
+        term.setBackgroundColor(colors.red)
+        term.setTextColor(colors.white)
+        term.clearLine()
+        term.write(" RPS ROGUE ")
+
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.white)
+        term.setCursorPos(2, math.floor(h/2) - 2)
         term.write("Insert Coin: 5 Credits")
-        sleep(2)
-        return
+        term.setCursorPos(2, math.floor(h/2))
+        term.setTextColor(colors.gray)
+        term.write("ATTRACTION MODE - Insert Disk to Play")
+
+        -- Simple demo text that cycles until a disk is inserted.
+        local demoLines = {
+            "Rock beats Scissors",
+            "Paper beats Rock",
+            "Scissors beats Paper",
+            "Level up and keep going!",
+        }
+
+        for i = 1, #demoLines do
+            term.setCursorPos(2, math.floor(h/2) + 2)
+            term.setTextColor(colors.yellow)
+            term.clearLine()
+            term.write(demoLines[i])
+            local brk = waitForDiskOrTimeout(1.0)
+            if brk and brk.type == "disk" then
+                break
+            end
+        end
     end
     creditsAPI.remove(5)
 

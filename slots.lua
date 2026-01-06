@@ -358,6 +358,118 @@ local function spin(player)
     end
 end
 
+local function waitForBreakEvent(seconds)
+    local timerId
+    if seconds and seconds > 0 then
+        timerId = os.startTimer(seconds)
+    end
+
+    while true do
+        local e, p1 = os.pullEvent()
+
+        if e == "disk" then
+            return { type = "disk", event = e, p1 = p1 }
+        end
+
+        local button = input.getButton(e, p1)
+        if button then
+            return { type = "button", button = button, event = e, p1 = p1 }
+        end
+
+        if e == "key" or e == "char" then
+            return { type = "key", event = e, p1 = p1 }
+        end
+
+        if timerId and e == "timer" and p1 == timerId then
+            return { type = "timeout" }
+        end
+    end
+end
+
+local function runAttractMode()
+    local fakeName = "CPU"
+    local fakeCredits = 999
+
+    local function computeWin(bet)
+        local function getSym(r, offset)
+            return REELS[r][(reelPos[r] + offset - 1) % #REELS[r] + 1]
+        end
+        local function checkLine(offset)
+            local s1, s2, s3 = getSym(1, offset), getSym(2, offset), getSym(3, offset)
+            if s1 == s2 and s2 == s3 then return PAYOUTS[s1] end
+            if s1 == "Cherry" and s2 == "Cherry" then return 5 end
+            return 0
+        end
+
+        local win = 0
+        if bet >= 1 then win = win + checkLine(1) end
+        if bet >= 2 then win = win + checkLine(0) end
+        if bet >= 3 then win = win + checkLine(2) end
+        return win
+    end
+
+    local function demoSpinOnce(bet)
+        -- Animation
+        for _ = 1, 20 do
+            for r = 1, 3 do
+                reelPos[r] = (reelPos[r] % #REELS[r]) + 1
+            end
+            drawMachine(bet, "ATTRACTION MODE - Spinning... (Insert Disk)", fakeName, fakeCredits)
+            audio.playShuffle()
+            local brk = waitForBreakEvent(0.05)
+            if brk and brk.type == "disk" then return brk end
+        end
+
+        -- Stop one by one
+        for r = 1, 3 do
+            for i = 1, 10 do
+                reelPos[r] = (reelPos[r] % #REELS[r]) + 1
+                for k = r + 1, 3 do
+                    reelPos[k] = (reelPos[k] % #REELS[k]) + 1
+                end
+                drawMachine(bet, "ATTRACTION MODE - Spinning... (Insert Disk)", fakeName, fakeCredits)
+                local brk = waitForBreakEvent(0.05 + i * 0.01)
+                if brk and brk.type == "disk" then return brk end
+            end
+            audio.playSlotStop()
+        end
+
+        local win = computeWin(bet)
+        if win > 0 then
+            audio.playWin()
+            for _ = 1, 3 do
+                drawMachine(bet, "ATTRACTION MODE - WINNER! " .. tostring(win), fakeName, fakeCredits)
+                local brk = waitForBreakEvent(0.12)
+                if brk and brk.type == "disk" then return brk end
+                term.setBackgroundColor(colors.lime)
+                term.clear()
+                brk = waitForBreakEvent(0.08)
+                if brk and brk.type == "disk" then return brk end
+            end
+        else
+            audio.playLose()
+            drawMachine(bet, "ATTRACTION MODE - Try again! (Insert Disk)", fakeName, fakeCredits)
+            local brk = waitForBreakEvent(0.8)
+            if brk and brk.type == "disk" then return brk end
+        end
+        return nil
+    end
+
+    while true do
+        local bet = math.random(1, 3)
+        drawMachine(bet, "ATTRACTION MODE - Insert Disk to Play", nil, nil)
+        local brk = waitForBreakEvent(0.6)
+        if brk and brk.type == "disk" then return brk end
+
+        brk = demoSpinOnce(bet)
+        if brk and brk.type == "disk" then return brk end
+
+        drawMachine(bet, "ATTRACTION MODE - Next spin... (Insert Disk)", nil, nil)
+        brk = waitForBreakEvent(0.8)
+        if brk and brk.type == "disk" then return brk end
+    end
+end
+
 --------------------------------------------------------------------------------
 -- MAIN LOOP
 --------------------------------------------------------------------------------
@@ -394,8 +506,47 @@ local function main()
         
         -- Lobby Loop
         local detectedCards = {}
+        local attractDelay = 8
+        local attractTimer = os.startTimer(attractDelay)
         while true do
             local event, p1 = os.pullEvent()
+
+            if event == "timer" and p1 == attractTimer and #detectedCards == 0 then
+                -- CPU demo until a disk is inserted (attract mode)
+                runAttractMode()
+
+                -- Redraw lobby after attract mode
+                term.setBackgroundColor(colors.black)
+                term.clear()
+                if w >= 34 and h >= 19 then
+                    blitFill(1, 1, w, 1, " ", colors.white, colors.blue)
+                    centerTextIn(1, 1, w, " SUPER SLOTS ", colors.yellow, colors.blue)
+                    local artX = clamp(cx - 16, 2, w - 32)
+                    local artY = clamp(cy - 6, 2, h - 12)
+                    shadowRect(artX, artY, 32, 10, colors.black)
+                    frameRect(artX, artY, 32, 10, colors.gray, colors.lightGray)
+                    blitFill(artX + 1, artY + 1, 30, 1, " ", colors.white, colors.orange)
+                    centerTextIn(artX + 1, artY + 1, 30, " INSERT CARDS ", colors.white, colors.orange)
+
+                    frameRect(artX + 4, artY + 3, 7, 5, colors.gray, colors.white)
+                    frameRect(artX + 13, artY + 3, 7, 5, colors.gray, colors.white)
+                    frameRect(artX + 22, artY + 3, 7, 5, colors.gray, colors.white)
+                    centerTextIn(artX + 4, artY + 5, 7, "@@@", colors.red, colors.white)
+                    centerTextIn(artX + 13, artY + 5, 7, "===", colors.lightGray, colors.white)
+                    centerTextIn(artX + 22, artY + 5, 7, "777", colors.red, colors.white)
+
+                    drawCenter(artY + 10, "Insert Cards (Max 3)", colors.white, colors.black)
+                    drawCenter(artY + 12, "[C] Start   [R] Exit", colors.gray, colors.black)
+                else
+                    drawCenter(h/2 - 2, "SUPER SLOTS", colors.gold, colors.black)
+                    drawCenter(h/2, "Insert Cards (Max 3)", colors.white, colors.black)
+                    drawCenter(h/2 + 2, "[C] Start   [R] Exit", colors.gray, colors.black)
+                end
+
+                -- Refresh cards and reset timer
+                detectedCards = creditsAPI.findCards()
+                attractTimer = os.startTimer(attractDelay)
+            end
 
             -- Arcade button controls (works for redstone + key-based configs)
             local button = input.getButton(event, p1)
@@ -404,6 +555,7 @@ local function main()
                 drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
                 sleep(1)
                 term.setCursorPos(1, h/2+4) term.clearLine()
+                attractTimer = os.startTimer(attractDelay)
             elseif button == "RIGHT" then
                 term.setBackgroundColor(colors.black)
                 term.clear()
@@ -418,6 +570,7 @@ local function main()
                     drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
                     sleep(1)
                     term.setCursorPos(1, h/2+4) term.clearLine()
+                    attractTimer = os.startTimer(attractDelay)
                 elseif key == "backspace" or key == "e" then -- Exit
                      term.setBackgroundColor(colors.black)
                      term.clear()
@@ -427,6 +580,7 @@ local function main()
             elseif event == "disk" or event == "disk_eject" then
                 -- Refresh cards
                 detectedCards = creditsAPI.findCards()
+                attractTimer = os.startTimer(attractDelay)
                 term.setCursorPos(1, h/2 + 4)
                 term.clearLine()
                 local msg = "Players: "
@@ -440,6 +594,7 @@ local function main()
              if #detectedCards == 0 then
                  detectedCards = creditsAPI.findCards()
                  if #detectedCards > 0 then
+                    attractTimer = os.startTimer(attractDelay)
                     term.setCursorPos(1, h/2 + 4)
                     term.clearLine()
                     local msg = "Players: "

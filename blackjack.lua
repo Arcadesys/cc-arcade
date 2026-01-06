@@ -293,6 +293,140 @@ local function drawTable(players, dealerHand, currentPlayerIdx, message, showDea
     drawText(colW*2 + math.floor((w - colW*2)/2 - #c3/2)+1, h, c3, colors.white, colors.blue)
 end
 
+local function waitForBreakEvent(seconds)
+    local timerId
+    if seconds and seconds > 0 then
+        timerId = os.startTimer(seconds)
+    end
+
+    while true do
+        local e, p1 = os.pullEvent()
+
+        if e == "disk" then
+            return { type = "disk", event = e, p1 = p1 }
+        end
+        if e == "disk_eject" then
+            return { type = "disk_eject", event = e, p1 = p1 }
+        end
+
+        local button = input.getButton(e, p1)
+        if button then
+            return { type = "button", button = button, event = e, p1 = p1 }
+        end
+
+        if e == "key" or e == "char" then
+            return { type = "key", event = e, p1 = p1 }
+        end
+
+        if timerId and e == "timer" and p1 == timerId then
+            return { type = "timeout" }
+        end
+    end
+end
+
+local function runAttractMode()
+    local function cpuWantsHit(hand)
+        local score = calculateHand(hand)
+        if score <= 11 then return true end
+        if score >= 17 then return false end
+        return score < 16
+    end
+
+    while true do
+        local players = {
+            { hand = {}, status = "Playing", name = "CPU 1" },
+            { hand = {}, status = "Playing", name = "CPU 2" },
+            { hand = {}, status = "Playing", name = "CPU 3" }
+        }
+
+        local deck = createDeck()
+        local dealerHand = {}
+
+        -- Initial deal
+        for _ = 1, 2 do
+            for _, p in ipairs(players) do
+                table.insert(p.hand, drawCardDeck(deck))
+                drawTable(players, dealerHand, 0, "ATTRACTION MODE - Insert Disk to Play", false)
+                local brk = waitForBreakEvent(0.15)
+                if brk and brk.type == "disk" then return brk end
+            end
+
+            table.insert(dealerHand, drawCardDeck(deck))
+            drawTable(players, dealerHand, 0, "ATTRACTION MODE - Insert Disk to Play", false)
+            local brk = waitForBreakEvent(0.15)
+            if brk and brk.type == "disk" then return brk end
+        end
+
+        -- CPU turns
+        for i, p in ipairs(players) do
+            while true do
+                local score = calculateHand(p.hand)
+                if score == 21 and #p.hand == 2 then
+                    p.status = "Blackjack!"
+                    break
+                elseif score > 21 then
+                    p.status = "Bust!"
+                    break
+                end
+
+                if cpuWantsHit(p.hand) then
+                    table.insert(p.hand, drawCardDeck(deck))
+                    drawTable(players, dealerHand, i, "ATTRACTION MODE - " .. p.name .. " hits", false)
+                    local brk = waitForBreakEvent(0.35)
+                    if brk and brk.type == "disk" then return brk end
+                else
+                    p.status = "Stand"
+                    drawTable(players, dealerHand, i, "ATTRACTION MODE - " .. p.name .. " stands", false)
+                    local brk = waitForBreakEvent(0.35)
+                    if brk and brk.type == "disk" then return brk end
+                    break
+                end
+            end
+        end
+
+        -- Dealer turn
+        drawTable(players, dealerHand, 0, "ATTRACTION MODE - Dealer reveals", true)
+        local brk = waitForBreakEvent(0.8)
+        if brk and brk.type == "disk" then return brk end
+
+        while calculateHand(dealerHand) < 17 do
+            table.insert(dealerHand, drawCardDeck(deck))
+            drawTable(players, dealerHand, 0, "ATTRACTION MODE - Dealer hits", true)
+            brk = waitForBreakEvent(0.6)
+            if brk and brk.type == "disk" then return brk end
+        end
+
+        -- Resolve (no credits; just show outcomes)
+        local dealerScore = calculateHand(dealerHand)
+        local dealerBust = dealerScore > 21
+
+        for _, p in ipairs(players) do
+            local pScore = calculateHand(p.hand)
+            if p.status == "Bust!" then
+                p.status = "LOSE"
+            elseif p.status == "Blackjack!" then
+                p.status = "WIN!"
+            elseif dealerBust then
+                p.status = "WIN!"
+            elseif pScore > dealerScore then
+                p.status = "WIN!"
+            elseif pScore == dealerScore then
+                p.status = "PUSH"
+            else
+                p.status = "LOSE"
+            end
+        end
+
+        drawTable(players, dealerHand, 0, "ATTRACTION MODE - Round over (Insert Disk)", true)
+        brk = waitForBreakEvent(2.0)
+        if brk and brk.type == "disk" then return brk end
+
+        -- Small pause before next round
+        brk = waitForBreakEvent(0.6)
+        if brk and brk.type == "disk" then return brk end
+    end
+end
+
 --------------------------------------------------------------------------------
 -- MAIN LOOP
 --------------------------------------------------------------------------------
@@ -311,8 +445,26 @@ local function main()
         
         -- Lobby Loop
         local detectedCards = {}
+        local attractDelay = 8
+        local attractTimer = os.startTimer(attractDelay)
         while true do
             local event, p1 = os.pullEvent()
+
+            if event == "timer" and p1 == attractTimer and #detectedCards == 0 then
+                -- CPU vs CPU demo until a disk is inserted (attract mode)
+                runAttractMode()
+
+                -- Redraw lobby after attract mode
+                term.setBackgroundColor(colors.black)
+                term.clear()
+                drawCenter(h/2 - 2, "BLACKJACK", colors.lime, colors.black)
+                drawCenter(h/2, "Insert Cards (Max 3)", colors.white, colors.black)
+                drawCenter(h/2 + 2, "[C] Start Game   [R] Exit", colors.gray, colors.black)
+
+                -- Refresh cards and reset timer
+                detectedCards = creditsAPI.findCards()
+                attractTimer = os.startTimer(attractDelay)
+            end
 
             -- Arcade button controls (works for redstone + key-based configs)
             local button = input.getButton(event, p1)
@@ -321,6 +473,7 @@ local function main()
                 drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
                 sleep(1)
                 term.setCursorPos(1, h/2+4) term.clearLine()
+                attractTimer = os.startTimer(attractDelay)
             elseif button == "RIGHT" then
                 term.setBackgroundColor(colors.black)
                 term.clear()
@@ -335,6 +488,7 @@ local function main()
                     drawCenter(h/2 + 4, "No players detected!", colors.red, colors.black)
                     sleep(1)
                     term.setCursorPos(1, h/2+4) term.clearLine()
+                    attractTimer = os.startTimer(attractDelay)
                 elseif key == "backspace" or key == "e" then -- Exit
                      term.setBackgroundColor(colors.black)
                      term.clear()
@@ -344,6 +498,7 @@ local function main()
             elseif event == "disk" or event == "disk_eject" then
                 -- Refresh cards
                 detectedCards = creditsAPI.findCards()
+                attractTimer = os.startTimer(attractDelay)
                 term.setCursorPos(1, h/2 + 4)
                 term.clearLine()
                 local msg = "Players: "
@@ -357,6 +512,7 @@ local function main()
             if #detectedCards == 0 then
                  detectedCards = creditsAPI.findCards()
                  if #detectedCards > 0 then
+                    attractTimer = os.startTimer(attractDelay)
                     term.setCursorPos(1, h/2 + 4)
                     term.clearLine()
                     local msg = "Players: "

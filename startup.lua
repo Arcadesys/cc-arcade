@@ -58,13 +58,93 @@ local function shouldKiosk()
     return false
 end
 
+-- Remote Update Function
+local function runRemoteUpdate()
+    term.clear()
+    term.setCursorPos(1, 1)
+    term.setTextColor(colors.yellow)
+    print("ARCADE OS UPDATER")
+    print("=================")
+    term.setTextColor(colors.white)
+    
+    -- Read update URL from .update_url or use default
+    local DEFAULT_URL = "https://raw.githubusercontent.com/Arcadesys/cc-arcade/main/install.lua"
+    local url = DEFAULT_URL
+    if fs.exists(".update_url") then
+        local f = fs.open(".update_url", "r")
+        if f then
+            local custom = (f.readAll() or ""):gsub("%s+", "")
+            f.close()
+            if custom ~= "" then url = custom end
+        end
+    end
+    
+    if not http then
+        term.setTextColor(colors.red)
+        print("")
+        print("ERROR: HTTP is disabled!")
+        print("Enable HTTP in ComputerCraft config.")
+        print("")
+        print("Press any key to continue boot...")
+        os.pullEvent("key")
+        return false
+    end
+    
+    print("")
+    print("Downloading from:")
+    term.setTextColor(colors.gray)
+    print(url:sub(1, 45) .. (url:len() > 45 and "..." or ""))
+    term.setTextColor(colors.white)
+    print("")
+    
+    local response, err = http.get(url)
+    if not response then
+        term.setTextColor(colors.red)
+        print("Download failed: " .. tostring(err))
+        print("")
+        print("Press any key to continue boot...")
+        os.pullEvent("key")
+        return false
+    end
+    
+    local content = response.readAll()
+    response.close()
+    
+    if not content or #content < 100 then
+        term.setTextColor(colors.red)
+        print("Invalid response (too short)")
+        print("")
+        print("Press any key to continue boot...")
+        os.pullEvent("key")
+        return false
+    end
+    
+    -- Backup and write
+    if fs.exists("install.lua") then
+        if fs.exists("install.lua.bak") then fs.delete("install.lua.bak") end
+        fs.copy("install.lua", "install.lua.bak")
+    end
+    
+    local f = fs.open("install.lua", "w")
+    f.write(content)
+    f.close()
+    
+    term.setTextColor(colors.lime)
+    print("Download complete!")
+    print("Running installer...")
+    sleep(1)
+    
+    shell.run("install.lua")
+    return true
+end
+
 if shouldKiosk() and fs.exists("kiosk.lua") then
     _G.ARCADE_KIOSK = true
     shell.run("kiosk.lua")
     os.reboot()
 end
 
-print("Press 'D' for Dev Mode (2s)...")
+print("Press 'D' Dev Mode, 'U' Update (2s)...")
 
 _G.ARCADE_DEV_MODE = false
 local timer = os.startTimer(2)
@@ -76,6 +156,11 @@ while true do
         _G.ARCADE_DEV_MODE = true
         print("DEV MODE ENABLED: Infinite Credits")
         sleep(1)
+        break
+    elseif event == "char" and p1:lower() == "u" then
+        runRemoteUpdate()
+        -- After update, installer reboots, so we won't reach here
+        -- But if update fails, continue boot
         break
     end
 end
