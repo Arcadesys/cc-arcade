@@ -114,6 +114,12 @@ function credits.remove(amount, mountPath)
     end
 end
 
+function credits.setName(name, mountPath)
+    local data = readData(mountPath) or { credits = DEFAULT_CREDITS }
+    data.name = name
+    return writeData(mountPath, data)
+end
+
 function credits.lock(mountPath)
     local data = readData(mountPath)
     if data then

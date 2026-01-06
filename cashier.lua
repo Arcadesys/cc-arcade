@@ -598,9 +598,104 @@ local function menuMain(cardPath)
 end
 
 local function promptNewCard(cardPath)
-    -- If card has no data/corrupt, init it
+    -- If card has no data/corrupt, prompt for initials
     if not credits.getName(cardPath) then
-        credits.set(0, cardPath) 
+        -- Initialize with 0 credits first
+        credits.set(0, cardPath)
+        
+        -- 3-letter initials input like arcade high score
+        local initials = {"A", "A", "A"}
+        local currentPos = 1
+        local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        
+        local function getAlphabetIndex(char)
+            return alphabet:find(char) or 1
+        end
+        
+        local function cycleChar(char, direction)
+            local idx = getAlphabetIndex(char)
+            idx = idx + direction
+            if idx < 1 then idx = #alphabet end
+            if idx > #alphabet then idx = 1 end
+            return alphabet:sub(idx, idx)
+        end
+        
+        while true do
+            clear()
+            centerText(3, "NEW PLAYER CARD", colors.cyan)
+            centerText(5, "Enter Your Initials", colors.white)
+            
+            -- Draw the 3 letter slots
+            local slotY = h/2
+            local startX = math.floor(w/2) - 3
+            
+            for i = 1, 3 do
+                local x = startX + (i-1) * 3
+                local color = (i == currentPos) and colors.yellow or colors.gray
+                
+                term.setCursorPos(x, slotY - 1)
+                term.setTextColor(color)
+                if i == currentPos then
+                    term.write(" ^")
+                else
+                    term.write("  ")
+                end
+                
+                term.setCursorPos(x, slotY)
+                term.setTextColor(color)
+                term.write("[" .. initials[i] .. "]")
+                
+                term.setCursorPos(x, slotY + 1)
+                if i == currentPos then
+                    term.write(" v")
+                else
+                    term.write("  ")
+                end
+            end
+            
+            centerText(slotY + 4, "[1] Change Letter", colors.lime)
+            centerText(slotY + 5, "[2] Next / Confirm", colors.cyan)
+            centerText(slotY + 6, "[3] Previous", colors.gray)
+            
+            local event, p1 = os.pullEvent()
+            resetActivity()
+            local btn = input.getButton(event, p1)
+            
+            if btn == "LEFT" then
+                -- Cycle current letter
+                audio.playClick()
+                initials[currentPos] = cycleChar(initials[currentPos], 1)
+                
+            elseif btn == "CENTER" then
+                audio.playClick()
+                if currentPos < 3 then
+                    -- Move to next position
+                    currentPos = currentPos + 1
+                else
+                    -- Confirm initials
+                    audio.playConfirm()
+                    local name = table.concat(initials)
+                    credits.setName(name, cardPath)
+                    
+                    -- Also set the disk label
+                    if drive then
+                        drive.setDiskLabel(name)
+                    end
+                    
+                    clear()
+                    centerText(h/2 - 1, "WELCOME", colors.lime)
+                    centerText(h/2 + 1, name, colors.yellow)
+                    sleep(1.5)
+                    break
+                end
+                
+            elseif btn == "RIGHT" then
+                audio.playClick()
+                if currentPos > 1 then
+                    currentPos = currentPos - 1
+                end
+            end
+        end
     end
     menuMain(cardPath)
 end
