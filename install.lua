@@ -4323,39 +4323,81 @@ local function main()
         
         local event, p1 = os.pullEvent()
         
+        -- Handle keyboard navigation separately from physical buttons
+        if event == "key" then
+            local keyName = keys.getName(p1)
+            if keyName == "up" then
+                selected = selected - 1
+                while menuItems[selected] and menuItems[selected].separator do
+                    selected = selected - 1
+                end
+                if selected < 1 then selected = #menuItems end
+                audio.playClick()
+            elseif keyName == "down" then
+                selected = selected + 1
+                while menuItems[selected] and menuItems[selected].separator do
+                    selected = selected + 1
+                end
+                if selected > #menuItems then selected = 1 end
+                audio.playClick()
+            elseif keyName == "enter" or keyName == "space" then
+                if menuItems[selected] and not menuItems[selected].separator then
+                    audio.playConfirm()
+                    launchGame(menuItems[selected])
+                    startJazz()
+                    cardInserted = credits.getName() ~= nil
+                end
+            elseif keyName == "left" then
+                selected = selected - 1
+                while menuItems[selected] and menuItems[selected].separator do
+                    selected = selected - 1
+                end
+                if selected < 1 then selected = #menuItems end
+                audio.playClick()
+            elseif keyName == "right" then
+                selected = selected + 1
+                while menuItems[selected] and menuItems[selected].separator do
+                    selected = selected + 1
+                end
+                if selected > #menuItems then selected = 1 end
+                audio.playClick()
+            end
+        end
+        
+        -- Handle physical arcade buttons (redstone/char)
         local button = input.getButton(event, p1)
         
-        if button == "LEFT" then
-            selected = selected - 1
-            -- Skip separators
-            while menuItems[selected] and menuItems[selected].separator do
+        if event == "redstone" or event == "char" then
+            if button == "LEFT" then
                 selected = selected - 1
-            end
-            if selected < 1 then selected = #menuItems end
-            audio.playClick()
-            if event == "redstone" then sleep(0.15) end
-            
-        elseif button == "RIGHT" then
-            selected = selected + 1
-            -- Skip separators
-            while menuItems[selected] and menuItems[selected].separator do
+                while menuItems[selected] and menuItems[selected].separator do
+                    selected = selected - 1
+                end
+                if selected < 1 then selected = #menuItems end
+                audio.playClick()
+                if event == "redstone" then sleep(0.15) end
+                
+            elseif button == "RIGHT" then
                 selected = selected + 1
+                while menuItems[selected] and menuItems[selected].separator do
+                    selected = selected + 1
+                end
+                if selected > #menuItems then selected = 1 end
+                audio.playClick()
+                if event == "redstone" then sleep(0.15) end
+                
+            elseif button == "CENTER" then
+                if menuItems[selected] and not menuItems[selected].separator then
+                    audio.playConfirm()
+                    launchGame(menuItems[selected])
+                    startJazz()
+                    cardInserted = credits.getName() ~= nil
+                end
+                if event == "redstone" then sleep(0.15) end
             end
-            if selected > #menuItems then selected = 1 end
-            audio.playClick()
-            if event == "redstone" then sleep(0.15) end
-            
-        elseif button == "CENTER" then
-            if menuItems[selected] and not menuItems[selected].separator then
-                audio.playConfirm()
-                launchGame(menuItems[selected])
-                -- Restart jazz after returning
-                startJazz()
-                cardInserted = credits.getName() ~= nil
-            end
-            if event == "redstone" then sleep(0.15) end
-            
-        elseif event == "disk" then
+        end
+        
+        if event == "disk" then
             local name = credits.getName()
             if name and not cardInserted then
                 cardInserted = true
@@ -4370,31 +4412,6 @@ local function main()
             
         elseif event == "timer" and p1 == animTimer then
             animTimer = os.startTimer(0.15)
-            
-        elseif event == "key" then
-            local name = keys.getName(p1)
-            if name == "up" then
-                selected = selected - 1
-                while menuItems[selected] and menuItems[selected].separator do
-                    selected = selected - 1
-                end
-                if selected < 1 then selected = #menuItems end
-                audio.playClick()
-            elseif name == "down" then
-                selected = selected + 1
-                while menuItems[selected] and menuItems[selected].separator do
-                    selected = selected + 1
-                end
-                if selected > #menuItems then selected = 1 end
-                audio.playClick()
-            elseif name == "enter" then
-                if menuItems[selected] and not menuItems[selected].separator then
-                    audio.playConfirm()
-                    launchGame(menuItems[selected])
-                    startJazz()
-                    cardInserted = credits.getName() ~= nil
-                end
-            end
         end
     end
 end
