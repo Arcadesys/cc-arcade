@@ -87,16 +87,84 @@ local function centerText(y, text, color)
 end
 
 -- === CONFIGURATION WIZARD ===
+
+-- Rename a peripheral via wired modem (CC:Tweaked)
+local function renamePeripheral(oldName, newName)
+    -- Find the modem that this peripheral is connected to
+    for _, modemName in ipairs(peripheral.getNames()) do
+        local modem = peripheral.wrap(modemName)
+        if modem and type(modem.getNameLocal) == "function" then
+            -- Check if this modem has the peripheral
+            local names = modem.getNamesRemote and modem.getNamesRemote() or {}
+            for _, name in ipairs(names) do
+                if name == oldName then
+                    -- Found it! Rename via this modem
+                    if modem.setNameLocal then
+                        local ok = pcall(function() modem.setNameLocal(oldName, newName) end)
+                        if ok then return newName end
+                    end
+                end
+            end
+        end
+    end
+    -- Fallback: return original name if rename failed
+    return oldName
+end
+
+local function loadChestConfig()
+    -- Try to load saved config first
+    if fs.exists(".chest_config") then
+        local f = fs.open(".chest_config", "r")
+        if f then
+            local data = f.readAll()
+            f.close()
+            local loaded = textutils.unserialize(data)
+            if loaded and loaded.bank and loaded.customer then
+                -- Verify the peripherals still exist
+                local bankExists = peripheral.isPresent(loaded.bank)
+                local customerExists = peripheral.isPresent(loaded.customer)
+                if bankExists and customerExists then
+                    return loaded
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local function configureChests()
+    -- Priority 0: Load saved config if valid
+    local savedConfig = loadChestConfig()
+    if savedConfig then
+        chestConfig = savedConfig
+        return
+    end
+
     -- Priority 1: Check for explicit "bank" and "drawer" named peripherals
     local hasBank = peripheral.isPresent("bank")
     local hasDrawer = peripheral.isPresent("drawer")
 
     if hasBank and hasDrawer then
-        -- Verify they are inventories (optional but good practice)
-        chestConfig = { bank = "bank", customer = "drawer" }
+        -- Rename to unique CLI-friendly names
+        local drawerName = renamePeripheral("drawer", "cashier_drawer")
+        local bankName = renamePeripheral("bank", "cashier_bank")
+        
+        chestConfig = { bank = bankName, customer = drawerName }
         
         -- Save config
+        local f = fs.open(".chest_config", "w")
+        f.write(textutils.serialize(chestConfig))
+        f.close()
+        return
+    end
+    
+    -- Priority 1b: Check for already-renamed cashier chests
+    local hasCashierBank = peripheral.isPresent("cashier_bank")
+    local hasCashierDrawer = peripheral.isPresent("cashier_drawer")
+    
+    if hasCashierBank and hasCashierDrawer then
+        chestConfig = { bank = "cashier_bank", customer = "cashier_drawer" }
+        
         local f = fs.open(".chest_config", "w")
         f.write(textutils.serialize(chestConfig))
         f.close()
@@ -153,20 +221,31 @@ local function configureChests()
                 
                 if bankChestName then
                    clear()
-                   centerText(h/2, "CONFIG SUCCESS!", colors.lime)
-                   centerText(h/2+2, "Drawer: " .. customerChestName, colors.gray)
-                   centerText(h/2+3, "Bank: " .. bankChestName, colors.gray)
+                   centerText(h/2-1, "CONFIG SUCCESS!", colors.lime)
+                   centerText(h/2+1, "Renaming chests...", colors.yellow)
+                   
+                   -- Rename chests to unique, CLI-friendly names
+                   local newDrawerName = renamePeripheral(customerChestName, "cashier_drawer")
+                   local newBankName = renamePeripheral(bankChestName, "cashier_bank")
+                   
+                   -- Update names if rename succeeded
+                   if newDrawerName ~= customerChestName then
+                       customerChestName = newDrawerName
+                   end
+                   if newBankName ~= bankChestName then
+                       bankChestName = newBankName
+                   end
+                   
+                   clear()
+                   centerText(h/2-1, "CONFIG SUCCESS!", colors.lime)
+                   centerText(h/2+1, "Drawer: " .. customerChestName, colors.gray)
+                   centerText(h/2+2, "Bank: " .. bankChestName, colors.gray)
                    
                    chestConfig = { customer = customerChestName, bank = bankChestName }
                    
                    local f = fs.open(".chest_config", "w")
                    f.write(textutils.serialize(chestConfig))
                    f.close()
-                   
-                   -- Attempt to label the peripherals appropriately if possible
-                   -- (This fulfills the 'name them appropriately' request if supported)
-                   pcall(function() peripheral.call(customerChestName, "setLabel", "drawer") end)
-                   pcall(function() peripheral.call(bankChestName, "setLabel", "bank") end)
                    
                    centerText(h-2, "Please Remove Diamond", colors.yellow)
                    sleep(3)
