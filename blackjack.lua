@@ -278,7 +278,10 @@ local function drawTable(players, dealerHand, currentPlayerIdx, message, showDea
     if currentPlayerIdx == 0 then
         c1 = "-"
         c2 = "Deal"
-        c3 = "Cash Out"
+        c3 = "Exit"
+        if message and string.find(message, "Round Over") then
+            c2 = "Next"
+        end
     elseif message and string.find(message, "ADV") then
         c1 = "Double"
         c2 = "Surrender"
@@ -328,13 +331,15 @@ local creditsAPI = require("credits")
 
     while true do
         -- Check Credits
-        if creditsAPI.get() < 10 then
+        while creditsAPI.get() < 10 do
             term.setBackgroundColor(colors.black)
             term.clear()
             drawCenter(h/2, "Not enough credits!", colors.red, colors.black)
             drawCenter(h/2+1, "Need 10 credits.", colors.white, colors.black)
-            sleep(2)
-            break
+            drawCenter(h/2+3, "[C] Retry  [R] Exit", colors.gray, colors.black)
+            if waitKey() == "RIGHT" then
+                return
+            end
         end
 
         -- New Round
@@ -378,10 +383,16 @@ local creditsAPI = require("credits")
                     local advAction = waitKey()
                     
                     if advAction == "LEFT" then -- Double Down
-                        table.insert(p.hand, drawCardDeck(deck))
-                        score = calculateHand(p.hand)
-                        if score > 21 then p.status = "Bust!" else p.status = "Dbl Stand" end
-                        break
+                        if creditsAPI.get() >= p.bet and creditsAPI.remove(p.bet) then
+                            p.bet = p.bet * 2
+                            table.insert(p.hand, drawCardDeck(deck))
+                            score = calculateHand(p.hand)
+                            if score > 21 then p.status = "Bust!" else p.status = "Dbl Stand" end
+                            break
+                        else
+                            drawTable(players, dealerHand, i, "Not enough credits to double.", false)
+                            sleep(1)
+                        end
                     elseif advAction == "CENTER" then -- Surrender
                          p.status = "Surrender"
                          break
@@ -451,18 +462,13 @@ local creditsAPI = require("credits")
             end
         end
         
-        drawTable(players, dealerHand, 0, "Round Over!", true)
+        drawTable(players, dealerHand, 0, "Round Over! [R] Exit  [C] Next", true)
         
         local endAction = waitKey()
         if endAction == "RIGHT" then
-            break
+            return
         end
     end
-    
-    -- Exit to Menu
-    term.setBackgroundColor(colors.black)
-    term.clear()
-    if fs.exists("menu.lua") then shell.run("menu.lua") end
 end
 
 main()

@@ -49,8 +49,8 @@ end
 function credits.add(amount)
     local current = credits.get()
     local newAmount = current + amount
-    credits.set(newAmount)
-    return newAmount
+    local ok = credits.set(newAmount)
+    return (ok and newAmount or current), ok
 end
 
 function credits.remove(amount)
@@ -60,8 +60,7 @@ function credits.remove(amount)
 
     local current = credits.get()
     if current >= amount then
-        credits.set(current - amount)
-        return true
+        return credits.set(current - amount)
     else
         return false
     end

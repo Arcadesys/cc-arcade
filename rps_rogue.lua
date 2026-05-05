@@ -148,7 +148,7 @@ local function drawUI()
     
     -- Stats
     drawBar("PLAYER", player.hp, player.maxHp, 3, colors.lime)
-    drawBar("ENEMY", enemy.hp, enemy.maxHp, 3, colors.red)
+    drawBar("ENEMY", enemy.hp, enemy.maxHp, 6, colors.red)
     
     -- Enemy is on the right
     term.setCursorPos(w - 15, 3)
@@ -213,10 +213,11 @@ local function main()
             term.setCursorPos(1, h/2 + 1)
             term.write("Reached Floor " .. floor)
             sleep(3)
-            break
+            break -- Break inner loop to restart
         end
         
         if enemy.hp <= 0 then
+            -- ... (existing win logic)
             -- Victory
             floor = floor + 1
             player.level = player.level + 1
@@ -251,8 +252,6 @@ local function main()
             end
         end
     end
-    
-    if fs.exists("menu.lua") then shell.run("menu.lua") end
 end
 
 main()

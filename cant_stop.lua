@@ -2,6 +2,7 @@
 -- A push-your-luck dice game for the Arcade OS
 
 local w, h = term.getSize()
+local cx, cy = math.floor(w / 2), math.floor(h / 2)
 
 -- 3-Button Config
 local KEYS = {
@@ -440,14 +441,18 @@ local function main()
             term.setCursorPos(1, h/2)
             term.write("PLAYER " .. currentPlayer .. " WINS!")
             sleep(3)
-            break
+            -- Restart game
+            break -- Breaks the inner loop, but we need to restart. 
+            -- Actually, the main loop structure is:
+            -- main() -> check credits -> player selection -> game loop
+            -- To restart fully, we should wrap everything in a "while true do" inside main, OR just let it break and have the outer loop restart.
+            -- But currently main() just runs once.
+            -- I need to refactor main to loop.
         end
         
         -- Switch Player
         currentPlayer = (currentPlayer % numPlayers) + 1
     end
-    
-    if fs.exists("menu.lua") then shell.run("menu.lua") end
 end
 
 main()

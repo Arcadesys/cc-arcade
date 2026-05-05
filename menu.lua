@@ -5,6 +5,7 @@
 local games = {
     { name = "Blackjack", cmd = "blackjack" },
     { name = "Super Slots", cmd = "slots" },
+    { name = "Idlecraft", cmd = "idlecraft" },
     { name = "Can't Stop", cmd = "cant_stop" },
     { name = "RPS Rogue", cmd = "rps_rogue" },
     { name = "Exit", cmd = "exit" },

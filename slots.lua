@@ -232,7 +232,6 @@ local function main()
             break
         end
     end
-    if fs.exists("menu.lua") then shell.run("menu.lua") end
 end
 
 main()
